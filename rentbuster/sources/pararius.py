@@ -420,10 +420,16 @@ class ParariusSource:
             listing.images = images[:6]
 
     async def close(self) -> None:
-        if self._browser:
-            await self._browser.close()
-            self._browser = None
-        if self._playwright:
-            await self._playwright.stop()
-            self._playwright = None
+        try:
+            if self._browser:
+                await asyncio.wait_for(self._browser.close(), timeout=10)
+        except (asyncio.TimeoutError, Exception) as exc:
+            log.warning("pararius: browser close timed out or failed: %s", exc)
+        self._browser = None
+        try:
+            if self._playwright:
+                await asyncio.wait_for(self._playwright.stop(), timeout=5)
+        except (asyncio.TimeoutError, Exception) as exc:
+            log.warning("pararius: playwright stop timed out: %s", exc)
+        self._playwright = None
         log.debug("pararius: browser closed")

@@ -50,6 +50,7 @@ class RentBuster:
         all_listings: list[Listing] = []
 
         for source in sources:
+            log.info("starting %s...", source.name)
             try:
                 source_listings = asyncio.run(source.fetch_listings())
                 log.info("%s: fetched %d listings", source.name, len(source_listings))
