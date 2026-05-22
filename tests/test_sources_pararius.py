@@ -1,0 +1,97 @@
+"""Tests for pararius.py module-level parsing helpers."""
+
+from __future__ import annotations
+
+import pytest
+
+from rentbuster.sources.pararius import (
+    _extract_postal_code,
+    _parse_address,
+    _parse_area,
+    _parse_energy_label,
+    _parse_price,
+    _parse_rooms,
+)
+from rentbuster.models import EnergyLabel
+
+
+class TestParsePrice:
+    def test_euro_with_comma(self):
+        assert _parse_price("€ 1,450 /month") == 1450
+
+    def test_euro_with_period_thousands(self):
+        assert _parse_price("€1.450") == 1450
+
+    def test_plain_number(self):
+        assert _parse_price("1500") == 1500
+
+    def test_empty_string(self):
+        assert _parse_price("") == 0
+
+    def test_no_number(self):
+        assert _parse_price("contact for price") == 0
+
+
+class TestParseArea:
+    def test_with_m2_symbol(self):
+        assert _parse_area("75 m²") == 75
+
+    def test_with_m2_text(self):
+        assert _parse_area("75m2") == 75
+
+    def test_no_number(self):
+        assert _parse_area("unknown") == 0
+
+    def test_empty(self):
+        assert _parse_area("") == 0
+
+
+class TestParseEnergyLabel:
+    def test_basic_labels(self):
+        assert _parse_energy_label("A") == EnergyLabel.A
+        assert _parse_energy_label("G") == EnergyLabel.G
+
+    def test_plus_labels(self):
+        assert _parse_energy_label("A+") == EnergyLabel.A_PLUS
+        assert _parse_energy_label("A++") == EnergyLabel.A_PLUS_PLUS
+
+    def test_empty(self):
+        assert _parse_energy_label("") is None
+
+    def test_invalid(self):
+        assert _parse_energy_label("Z") is None
+
+
+class TestExtractPostalCode:
+    def test_spaced_format(self):
+        assert _extract_postal_code("Amsterdam 1015 CJ") == "1015 CJ"
+
+    def test_no_space(self):
+        assert _extract_postal_code("1015CJ Amsterdam") == "1015 CJ"
+
+    def test_no_match(self):
+        assert _extract_postal_code("No postal code here") is None
+
+
+class TestParseAddress:
+    def test_simple(self):
+        street, num, add = _parse_address("Keizersgracht 123")
+        assert street == "Keizersgracht"
+        assert num == "123"
+        assert add == ""
+
+    def test_with_letter_addition(self):
+        street, num, add = _parse_address("Keizersgracht 123-A")
+        assert street == "Keizersgracht"
+        assert num == "123"
+        assert add == "A"
+
+    def test_multi_word_street(self):
+        street, num, add = _parse_address("Van der Pekstraat 42")
+        assert "Pekstraat" in street
+        assert num == "42"
+
+    def test_empty(self):
+        street, num, add = _parse_address("")
+        assert street == ""
+        assert num == ""

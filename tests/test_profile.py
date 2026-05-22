@@ -2,34 +2,27 @@ from __future__ import annotations
 
 import pytest
 
-from radar.profile import PROFILES_DIR, Profile, SearchConfig, load_profile
+from rentbuster.profile import PROFILES_DIR, Profile, SearchConfig, WWSConfig, load_profile
 
-BUILTIN_PROFILES = ["generic", "student-amsterdam", "young-professional-randstad", "family-utrecht"]
+RENTBUSTER_PROFILES = ["amsterdam"]
+OLD_PROFILES = ["generic", "student-amsterdam", "young-professional-randstad", "family-utrecht"]
 
 
-@pytest.mark.parametrize("name", BUILTIN_PROFILES)
-def test_builtin_profile_loads(name):
-    profile = load_profile(name)
-    assert profile.name
+def test_amsterdam_profile_loads():
+    profile = load_profile("amsterdam")
+    assert profile.name == "amsterdam"
     assert profile.description
-    assert profile.scoring_prompt
-    assert "{listing_data}" in profile.scoring_prompt
     assert isinstance(profile.search, SearchConfig)
-    assert profile.search.city_slug.startswith(("huurwoningen-", "kamers-"))
-    assert profile.search.radius_km >= 0
-    assert profile.search.sort in {"newest", "price_asc", "price_desc"}
-
-
-def test_all_profiles_are_discoverable():
-    discovered = sorted(p.stem for p in PROFILES_DIR.glob("*.yaml") if ".local" not in p.stem)
-    for name in BUILTIN_PROFILES:
-        assert name in discovered, f"Missing {name} in {discovered}"
+    assert profile.search.city == "amsterdam"
+    assert profile.search.max_rent > 0
+    assert isinstance(profile.wws, WWSConfig)
+    assert profile.wws.min_savings >= 0
 
 
 def test_profile_from_path():
-    path = PROFILES_DIR / "generic.yaml"
+    path = PROFILES_DIR / "amsterdam.yaml"
     profile = load_profile(str(path))
-    assert profile.name == "generic"
+    assert profile.name == "amsterdam"
 
 
 def test_missing_profile_raises():
@@ -39,11 +32,18 @@ def test_missing_profile_raises():
 
 def test_profile_from_dict_requires_keys():
     with pytest.raises(ValueError):
-        Profile.from_dict({"name": "x"})  # missing search + scoring_prompt
+        Profile.from_dict({"description": "x"})  # missing name + search
 
 
 def test_search_config_defaults():
     sc = SearchConfig.from_dict({})
-    assert sc.city_slug == "huurwoningen-amsterdam"
-    assert sc.radius_km == 5
-    assert sc.listing_types == [1, 2, 3, 4]
+    assert sc.city == "amsterdam"
+    assert sc.max_rent == 2500
+    assert "apartment" in sc.property_types
+
+
+def test_wws_config_defaults():
+    wws = WWSConfig.from_dict({})
+    assert wws.bustable_only is True
+    assert wws.min_savings == 50
+    assert wws.default_outdoor_points < 0

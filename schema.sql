@@ -1,84 +1,91 @@
--- Kamernet Radar — database schema
+-- RentBuster — database schema
 -- Run against any Postgres 13+ instance to create tables.
--- From the CLI: `python -m radar init-db`
+-- From the CLI: `python -m rentbuster init-db`
 
 -- ── Core listings ────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS listings (
-    listing_id               INTEGER PRIMARY KEY,
+    id                       SERIAL PRIMARY KEY,
+
+    -- Identity
+    source                   TEXT NOT NULL,         -- 'pararius' | 'rentbuster_nl'
+    source_id                TEXT NOT NULL,
+    url                      TEXT,
+
+    -- Address
     street                   TEXT,
-    city                     TEXT,
-    city_slug                TEXT,
-    street_slug              TEXT,
-    postal_code              TEXT,
     house_number             TEXT,
     house_number_addition    TEXT,
-    listing_type             SMALLINT,
-    furnishing_id            SMALLINT,
-    total_rental_price       INTEGER,
-    surface_area             INTEGER,
-    deposit                  INTEGER,
-    utilities_included       BOOLEAN,
-    num_bedrooms             SMALLINT,
+    postal_code              TEXT,
+    city                     TEXT,
+    neighborhood             TEXT,
+    address_key              TEXT,                  -- normalized for dedup
+
+    -- Property
+    asking_rent              INTEGER,               -- EUR/month
+    surface_area_m2          INTEGER,
     num_rooms                SMALLINT,
-    energy_label_id          SMALLINT,
-    pets_allowed             BOOLEAN,
-    smoking_allowed          BOOLEAN,
-    registration_allowed     BOOLEAN,
-    min_age                  SMALLINT,
-    max_age                  SMALLINT,
-    suitable_for_persons     SMALLINT,
-    availability_start       DATE,
-    availability_end         DATE,
-    detailed_title           TEXT,
-    detailed_description     TEXT,
-    thumbnail_url            TEXT,
-    full_preview_image_url   TEXT,
-    additional_images        JSONB,
-    landlord_name            TEXT,
-    landlord_verified        BOOLEAN DEFAULT FALSE,
-    landlord_response_rate   SMALLINT,
-    landlord_response_time   TEXT,
-    landlord_member_since    TIMESTAMPTZ,
-    landlord_last_seen       TIMESTAMPTZ,
-    landlord_active_listings SMALLINT,
-    create_date              TIMESTAMPTZ,
-    publish_date             TIMESTAMPTZ,
+    energy_label             TEXT,                  -- 'A', 'B', ..., 'A++++'
+    construction_year        SMALLINT,
+    property_type            TEXT,
+    interior                 TEXT,
+    description              TEXT,
+    images                   JSONB,
+    available_from           TEXT,
+    agency_name              TEXT,
+
+    -- WWS scoring
+    wws_points               REAL,
+    wws_max_rent             REAL,
+    wws_savings              REAL,
+    wws_is_bustable          BOOLEAN DEFAULT FALSE,
+    wws_confidence           TEXT,                  -- 'HIGH' | 'MEDIUM' | 'LOW' | 'VERY_LOW'
+    wws_breakdown            JSONB,
+    wws_flags                JSONB,
+
+    -- WOZ data
+    woz_value                INTEGER,               -- EUR
+    woz_reference_date       TEXT,
+    woz_verified             BOOLEAN DEFAULT FALSE,
+
+    -- Rent-buster.nl cross-reference
+    rb_estimated_max_rent    REAL,
+    rb_savings               REAL,
+    rb_confidence            TEXT,
+
+    -- Timestamps
     first_seen_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_seen_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     disappeared_at           TIMESTAMPTZ,
-    is_new_advert            BOOLEAN DEFAULT FALSE,
-    is_top_advert            BOOLEAN DEFAULT FALSE,
-    ai_score                 INTEGER,
-    ai_score_reasoning       TEXT,
-    updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT listings_source_id UNIQUE (source, source_id)
 );
 
--- Idempotent upgrades for DBs created from an earlier schema revision.
-ALTER TABLE listings ADD COLUMN IF NOT EXISTS ai_score           INTEGER;
-ALTER TABLE listings ADD COLUMN IF NOT EXISTS ai_score_reasoning TEXT;
+CREATE INDEX IF NOT EXISTS idx_listings_source          ON listings (source);
+CREATE INDEX IF NOT EXISTS idx_listings_city            ON listings (city);
+CREATE INDEX IF NOT EXISTS idx_listings_address_key     ON listings (address_key);
+CREATE INDEX IF NOT EXISTS idx_listings_asking_rent     ON listings (asking_rent);
+CREATE INDEX IF NOT EXISTS idx_listings_wws_bustable    ON listings (wws_is_bustable) WHERE wws_is_bustable = TRUE;
+CREATE INDEX IF NOT EXISTS idx_listings_wws_points      ON listings (wws_points);
+CREATE INDEX IF NOT EXISTS idx_listings_first_seen      ON listings (first_seen_at);
+CREATE INDEX IF NOT EXISTS idx_listings_last_seen       ON listings (last_seen_at);
+CREATE INDEX IF NOT EXISTS idx_listings_active          ON listings (disappeared_at) WHERE disappeared_at IS NULL;
 
-CREATE INDEX IF NOT EXISTS idx_listings_price         ON listings (total_rental_price);
-CREATE INDEX IF NOT EXISTS idx_listings_type          ON listings (listing_type);
-CREATE INDEX IF NOT EXISTS idx_listings_city          ON listings (city);
-CREATE INDEX IF NOT EXISTS idx_listings_first_seen    ON listings (first_seen_at);
-CREATE INDEX IF NOT EXISTS idx_listings_last_seen     ON listings (last_seen_at);
-CREATE INDEX IF NOT EXISTS idx_listings_active        ON listings (disappeared_at) WHERE disappeared_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_listings_surface_area  ON listings (surface_area);
-CREATE INDEX IF NOT EXISTS idx_listings_ai_score      ON listings (ai_score) WHERE ai_score IS NOT NULL;
+-- ── WOZ cache ────────────────────────────────────────────────────────
 
--- ── Price/surface snapshots ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS woz_cache (
+    postal_code              TEXT NOT NULL,
+    house_number             TEXT NOT NULL,
+    house_number_addition    TEXT NOT NULL DEFAULT '',
+    woz_value                INTEGER NOT NULL,
+    reference_date           TEXT,
+    verified                 BOOLEAN DEFAULT FALSE,
+    source                   TEXT,                  -- 'kadaster' | 'estimated'
+    fetched_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-CREATE TABLE IF NOT EXISTS listing_snapshots (
-    id                 SERIAL PRIMARY KEY,
-    listing_id         INTEGER NOT NULL REFERENCES listings(listing_id),
-    total_rental_price INTEGER,
-    surface_area       INTEGER,
-    captured_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    PRIMARY KEY (postal_code, house_number, house_number_addition)
 );
-
-CREATE INDEX IF NOT EXISTS idx_snapshots_listing   ON listing_snapshots (listing_id);
-CREATE INDEX IF NOT EXISTS idx_snapshots_captured  ON listing_snapshots (captured_at);
 
 -- ── Telegram subscribers ─────────────────────────────────────────────
 
@@ -92,10 +99,12 @@ CREATE TABLE IF NOT EXISTS telegram_subscribers (
 -- ── Scraper run log ──────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS scrape_runs (
-    id          SERIAL PRIMARY KEY,
-    started_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    finished_at TIMESTAMPTZ,
-    total_found INTEGER DEFAULT 0,
-    new_found   INTEGER DEFAULT 0,
-    errors      TEXT
+    id              SERIAL PRIMARY KEY,
+    started_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at     TIMESTAMPTZ,
+    source          TEXT,
+    total_found     INTEGER DEFAULT 0,
+    new_found       INTEGER DEFAULT 0,
+    bustable_found  INTEGER DEFAULT 0,
+    errors          TEXT
 );
