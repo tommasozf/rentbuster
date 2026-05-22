@@ -177,11 +177,19 @@ class ParariusSource:
         page.set_default_timeout(30_000)
         return page
 
-    async def _get_page(self, url: str):
+    async def _get_page(self, url: str, wait_for_listings: bool = False):
         page = await self._new_page()
         try:
             await page.goto(url, wait_until="domcontentloaded")
-            await asyncio.sleep(2)  # let JS settle
+            if wait_for_listings:
+                try:
+                    await page.wait_for_selector(
+                        "li.search-list__item--listing", timeout=12_000
+                    )
+                except Exception:
+                    await asyncio.sleep(3)  # fallback if no listings found
+            else:
+                await asyncio.sleep(2)
         except Exception as exc:
             log.warning("pararius: page load issue for %s: %s", url, exc)
         return page
@@ -195,7 +203,7 @@ class ParariusSource:
             log.info("pararius: fetching page %d — %s", page_num, url)
 
             try:
-                page = await self._get_page(url)
+                page = await self._get_page(url, wait_for_listings=True)
                 page_listings = await self._parse_listing_cards(page)
                 await page.close()
             except Exception as exc:

@@ -5,8 +5,8 @@ search:
   max_rent: 2500
   min_size: 0
   property_types: [apartment, studio]
-  pararius_max_pages: 5
-  rentbuster_nl_max_pages: 10
+  pararius_max_pages: 10
+  rentbuster_nl_max_pages: 23
 wws:
   bustable_only: true
   min_savings: 50
