@@ -1,8 +1,7 @@
 """Pararius.com scraper using Playwright.
 
-CRITICAL: CSS selectors below were written based on Pararius DOM inspection
-(May 2025). If selectors stop matching, re-inspect pararius.com/apartments/amsterdam
-in a browser with DevTools to update them.
+CSS selectors verified against pararius.com/apartments/amsterdam on 2026-05-22.
+Uses playwright-stealth to bypass Cloudflare Turnstile bot detection.
 """
 
 from __future__ import annotations
@@ -11,7 +10,6 @@ import asyncio
 import logging
 import random
 import re
-import time
 from typing import Any
 
 from rentbuster.models import EnergyLabel, Listing, Source
@@ -20,28 +18,40 @@ log = logging.getLogger(__name__)
 
 BASE_URL = "https://www.pararius.com"
 
-# ── Parsing helpers (module-level, pure functions for testability) ──────────────
+# Property type prefixes in listing titles (stripped before address parsing)
+_PROPERTY_TYPE_PREFIXES = {
+    "flat": "apartment",
+    "apartment": "apartment",
+    "studio": "studio",
+    "room": "room",
+    "house": "house",
+    "villa": "house",
+}
 
-_PRICE_RE = re.compile(r"[\d.,]+")
+# ── Parsing helpers (module-level pure functions for testability) ──────────────
+
+_PRICE_RE = re.compile(r"[\d]+")
 _AREA_RE = re.compile(r"(\d+)\s*m")
 _POSTAL_RE = re.compile(r"\b(\d{4})\s*([A-Z]{2})\b")
-_ADDRESS_RE = re.compile(
-    r"^(.+?)\s+(\d+)\s*[-–]?\s*([A-Za-z0-9]*)$"
-)
+_ADDRESS_RE = re.compile(r"^(.+?)\s+(\d+[-–]?\d*)\s*([A-Za-z]*)$")
+_YEAR_RE = re.compile(r"\b(1[6-9]\d{2}|20[0-2]\d)\b")
 
 
 def _parse_price(text: str) -> int:
-    """Extract integer EUR/month from strings like '€ 1,450 /month' or '1.450'."""
+    """Extract integer EUR/month from strings like '€2,600 pcm' or '€ 1.450'."""
     if not text:
         return 0
-    cleaned = text.replace(".", "").replace(",", "")
+    # Strip everything that's not a digit (period/comma as thousands sep → remove)
+    cleaned = text.replace(".", "").replace(",", "").replace("\xa0", "")
     nums = _PRICE_RE.findall(cleaned)
-    if not nums:
-        return 0
-    try:
-        return int(nums[0])
-    except (ValueError, IndexError):
-        return 0
+    for n in nums:
+        try:
+            val = int(n)
+            if val > 100:  # skip tiny numbers that are price-per-m² etc.
+                return val
+        except ValueError:
+            continue
+    return 0
 
 
 def _parse_area(text: str) -> int:
@@ -53,43 +63,58 @@ def _parse_area(text: str) -> int:
 
 
 def _parse_energy_label(text: str) -> EnergyLabel | None:
-    """Extract energy label from text."""
+    """Extract energy label from a string like 'D' or 'A++'."""
     if not text:
         return None
-    text = text.strip()
-    return EnergyLabel.from_string(text)
+    return EnergyLabel.from_string(text.strip().split()[0])
 
 
 def _extract_postal_code(text: str) -> str | None:
-    """Match Dutch postal code pattern like '1015 CJ' or '1015CJ'."""
+    """Match Dutch postal code like '1012 AE' or '1012AE'."""
     m = _POSTAL_RE.search(text.upper())
-    if m:
-        return f"{m.group(1)} {m.group(2)}"
-    return None
+    return f"{m.group(1)} {m.group(2)}" if m else None
 
 
-def _parse_address(text: str) -> tuple[str, str, str]:
-    """Parse 'Street 123-A' or 'Van der Pekstraat 42 II' into (street, number, addition).
+def _parse_address(title: str) -> tuple[str, str, str, str]:
+    """Parse 'Flat Prins Hendrikkade 86 A' → (property_type, street, number, addition).
 
-    Returns ('', '', '') on parse failure.
+    Strips a known property type prefix word, then parses the remainder.
+    Returns (property_type, street, house_number, addition).
     """
-    if not text:
-        return "", "", ""
-    text = text.strip()
-    m = _ADDRESS_RE.match(text)
+    if not title:
+        return "apartment", "", "", ""
+
+    words = title.strip().split()
+    property_type = "apartment"
+    if words and words[0].lower() in _PROPERTY_TYPE_PREFIXES:
+        property_type = _PROPERTY_TYPE_PREFIXES[words[0].lower()]
+        words = words[1:]
+
+    address = " ".join(words)
+    m = _ADDRESS_RE.match(address)
     if m:
-        return m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
-    # Fallback: try to find number at the end
-    parts = text.rsplit(" ", 1)
-    if len(parts) == 2 and parts[1].isdigit():
-        return parts[0], parts[1], ""
-    return text, "", ""
+        street = m.group(1).strip()
+        number = m.group(2).strip()
+        addition = m.group(3).strip()
+        return property_type, street, number, addition
+
+    # Fallback: find last digit sequence
+    parts = address.rsplit(" ", 1)
+    if len(parts) == 2 and re.match(r"\d", parts[1]):
+        return property_type, parts[0], parts[1], ""
+
+    return property_type, address, "", ""
 
 
 def _parse_rooms(text: str) -> int:
     """Extract room count from '3 rooms' or '3 kamers'."""
     m = re.search(r"(\d+)", text or "")
     return int(m.group(1)) if m else 0
+
+
+def _parse_construction_year(text: str) -> int | None:
+    m = _YEAR_RE.search(text or "")
+    return int(m.group()) if m else None
 
 
 # ── Pararius source ────────────────────────────────────────────────────────────
@@ -115,6 +140,7 @@ class ParariusSource:
         self.detail_delay = detail_delay
         self.fetch_details = fetch_details
         self._browser = None
+        self._context = None
         self._playwright = None
 
     def _build_search_url(self, page: int = 1) -> str:
@@ -129,19 +155,33 @@ class ParariusSource:
         if self._browser is not None:
             return
         from playwright.async_api import async_playwright
+        from playwright_stealth import Stealth
 
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(headless=self.headless)
+        self._context = await self._browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            ),
+            viewport={"width": 1280, "height": 800},
+        )
+        # Apply stealth to all new pages in this context
+        self._stealth = Stealth()
         log.debug("pararius: browser launched")
 
-    async def _get_page(self, url: str):
-        """Navigate to a URL and return the page object."""
+    async def _new_page(self):
         await self._ensure_browser()
-        page = await self._browser.new_page()
+        page = await self._context.new_page()
+        await self._stealth.apply_stealth_async(page)
         page.set_default_timeout(30_000)
+        return page
+
+    async def _get_page(self, url: str):
+        page = await self._new_page()
         try:
             await page.goto(url, wait_until="domcontentloaded")
-            await page.wait_for_load_state("networkidle", timeout=15_000)
+            await asyncio.sleep(2)  # let JS settle
         except Exception as exc:
             log.warning("pararius: page load issue for %s: %s", url, exc)
         return page
@@ -170,14 +210,13 @@ class ParariusSource:
             for l in new:
                 seen_ids.add(l.source_id)
             listings.extend(new)
-            log.info("pararius: page %d → %d listings (total so far: %d)", page_num, len(new), len(listings))
+            log.info("pararius: page %d → %d listings (total: %d)", page_num, len(new), len(listings))
 
             if page_num < self.max_pages:
-                delay = random.uniform(2.0, 5.0)
-                await asyncio.sleep(delay)
+                await asyncio.sleep(random.uniform(2.0, 5.0))
 
         if self.fetch_details and listings:
-            log.info("pararius: fetching detail pages for %d listings", len(listings))
+            log.info("pararius: fetching details for %d listings", len(listings))
             for listing in listings:
                 try:
                     await self.fetch_listing_details(listing)
@@ -188,27 +227,13 @@ class ParariusSource:
         return listings
 
     async def _parse_listing_cards(self, page) -> list[Listing]:
-        """Parse listing cards from a search results page."""
-        listings: list[Listing] = []
-
-        # Try multiple selector patterns — Pararius may change DOM structure
-        card_selectors = [
-            "article.listing-search-item",
-            "li.search-list__item--listing",
-            "[class*='listing-search-item']",
-            "article[data-object-url-title]",
-        ]
-        cards = []
-        for selector in card_selectors:
-            cards = await page.query_selector_all(selector)
-            if cards:
-                log.debug("pararius: found %d cards with selector %r", len(cards), selector)
-                break
-
+        # Verified selector: li.search-list__item--listing (2026-05-22)
+        cards = await page.query_selector_all("li.search-list__item--listing")
         if not cards:
-            log.warning("pararius: no listing cards found on page — selectors may need updating")
+            log.warning("pararius: no listing cards found — selector may need updating")
             return []
 
+        listings = []
         for card in cards:
             try:
                 listing = await self._parse_card(card)
@@ -220,57 +245,67 @@ class ParariusSource:
         return listings
 
     async def _parse_card(self, card) -> Listing | None:
-        """Extract a Listing from a single search result card element."""
-        # Get the listing detail URL (used as source_id anchor)
-        link = await card.query_selector("a[href*='/apartment/']")
-        if not link:
-            link = await card.query_selector("a.listing-search-item__link")
-        if not link:
-            link = await card.query_selector("h2 a, h3 a")
+        # Link — verified: a.listing-search-item__link--depiction
+        link = await card.query_selector("a.listing-search-item__link--depiction")
         if not link:
             return None
-
         href = await link.get_attribute("href") or ""
         if not href:
             return None
-        url = href if href.startswith("http") else f"{BASE_URL}{href}"
-        # Extract source_id from URL path (last path segment)
-        source_id = url.rstrip("/").split("/")[-1]
-        if not source_id:
-            return None
 
-        # Title / address
-        title_el = await card.query_selector("h2, h3, .listing-search-item__title")
+        # URL format: /apartment-for-rent/amsterdam/9f9d422e/prins-hendrikkade
+        url = f"{BASE_URL}{href}"
+        parts = href.rstrip("/").split("/")
+        # source_id is the UUID-like segment (3rd from end in the path)
+        source_id = parts[-2] if len(parts) >= 2 else parts[-1]
+
+        # Title / address — verified: h3 or .listing-search-item__title
+        title_el = await card.query_selector("h2.listing-search-item__title, h3.listing-search-item__title")
+        if not title_el:
+            title_el = await card.query_selector(".listing-search-item__title")
         title = (await title_el.inner_text()).strip() if title_el else ""
-        street, house_number, addition = _parse_address(title)
+        property_type, street, house_number, addition = _parse_address(title)
 
-        # Price
-        price_el = await card.query_selector(
-            ".listing-search-item__price, [class*='price'], span[class*='price']"
-        )
+        # Sub-title contains postal code and neighborhood — verified: .listing-search-item__sub-title
+        sub_title_el = await card.query_selector(".listing-search-item__sub-title")
+        sub_title = (await sub_title_el.inner_text()).strip() if sub_title_el else ""
+        postal_code = _extract_postal_code(sub_title) or ""
+
+        # Neighborhood: text after city name in parentheses: "1012 AE Amsterdam (Burgwallen-Oude Zijde)"
+        neighborhood = ""
+        neigh_m = re.search(r"\(([^)]+)\)", sub_title)
+        if neigh_m:
+            neighborhood = neigh_m.group(1)
+
+        # Price — verified: .listing-search-item__price
+        price_el = await card.query_selector(".listing-search-item__price")
         price_text = (await price_el.inner_text()).strip() if price_el else ""
         asking_rent = _parse_price(price_text)
 
-        # Surface area
-        area_el = await card.query_selector(
-            ".listing-search-item__surface, [class*='surface'], [class*='size']"
-        )
-        area_text = (await area_el.inner_text()).strip() if area_el else ""
-        surface_area = _parse_area(area_text)
+        # Features: "70 m²\n2 rooms\nFurnished" — verified: .listing-search-item__features
+        features_el = await card.query_selector(".listing-search-item__features")
+        features_text = (await features_el.inner_text()).strip() if features_el else ""
+        surface_area = _parse_area(features_text)
+        num_rooms = 0
+        interior = ""
+        for line in features_text.split("\n"):
+            line = line.strip()
+            if "room" in line.lower() or "kamer" in line.lower():
+                num_rooms = _parse_rooms(line)
+            elif any(kw in line.lower() for kw in ("furnished", "unfurnished", "bare", "gemeubileerd")):
+                interior = line
 
-        # Rooms
-        rooms_el = await card.query_selector("[class*='rooms'], [class*='kamers']")
-        rooms_text = (await rooms_el.inner_text()).strip() if rooms_el else ""
-        num_rooms = _parse_rooms(rooms_text)
-
-        # Property type (from URL or card)
-        property_type = "apartment"
-        if "/studio/" in url:
-            property_type = "studio"
-
-        # Agency
-        agency_el = await card.query_selector("[class*='agent'], [class*='agency'], [class*='broker']")
+        # Agency — verified: .listing-search-item__agent
+        agency_el = await card.query_selector(".listing-search-item__agent")
         agency_name = (await agency_el.inner_text()).strip() if agency_el else ""
+
+        # Image
+        img_el = await card.query_selector("img.picture__image")
+        images = []
+        if img_el:
+            src = await img_el.get_attribute("src") or ""
+            if src:
+                images = [src]
 
         return Listing(
             source=Source.PARARIUS,
@@ -279,16 +314,19 @@ class ParariusSource:
             street=street,
             house_number=house_number,
             house_number_addition=addition,
+            postal_code=postal_code,
             city=self.city,
+            neighborhood=neighborhood,
             asking_rent=asking_rent,
             surface_area_m2=surface_area,
             num_rooms=num_rooms,
             property_type=property_type,
-            agency_name=agency_name,
+            interior=interior,
+            images=images,
         )
 
     async def fetch_listing_details(self, listing: Listing) -> None:
-        """Visit the detail page and enrich the listing with additional fields."""
+        """Visit the detail page and enrich listing with energy label, year, description, etc."""
         page = await self._get_page(listing.url)
         try:
             await self._parse_detail_page(page, listing)
@@ -296,65 +334,78 @@ class ParariusSource:
             await page.close()
 
     async def _parse_detail_page(self, page, listing: Listing) -> None:
-        """Extract detail-page fields into an existing Listing."""
-        # Full address with postal code
-        address_text = ""
-        for sel in ("address", "[class*='address']", "[itemprop='address']"):
-            el = await page.query_selector(sel)
-            if el:
-                address_text = (await el.inner_text()).strip()
-                break
+        # Postal code + neighborhood from detail — verified: .listing-detail-summary__location
+        loc_el = await page.query_selector(".listing-detail-summary__location")
+        if loc_el:
+            loc_text = (await loc_el.inner_text()).strip()
+            pc = _extract_postal_code(loc_text)
+            if pc and not listing.postal_code:
+                listing.postal_code = pc
+            neigh_m = re.search(r"\(([^)]+)\)", loc_text)
+            if neigh_m and not listing.neighborhood:
+                listing.neighborhood = neigh_m.group(1)
 
-        postal = _extract_postal_code(address_text or await page.content())
-        if postal:
-            listing.postal_code = postal
+        # Agency name
+        agency_el = await page.query_selector(".listing-detail-summary__agent, [class*=agent-summary]")
+        if agency_el and not listing.agency_name:
+            listing.agency_name = (await agency_el.inner_text()).strip()
 
-        # If we didn't get the street from the card, try from detail
-        if not listing.street and address_text:
-            street, num, add = _parse_address(address_text)
-            if street:
-                listing.street = street
-                listing.house_number = num
-                listing.house_number_addition = add
+        # Available from
+        avail_el = await page.query_selector(".listing-detail-summary__availability")
+        if avail_el:
+            listing.available_from = (await avail_el.inner_text()).strip()
 
-        # Features table (dt/dd pairs)
+        # Feature dt/dd table — verified structure (2026-05-22)
         dts = await page.query_selector_all("dt")
         dds = await page.query_selector_all("dd")
         for dt, dd in zip(dts, dds):
             key = (await dt.inner_text()).strip().lower()
             val = (await dd.inner_text()).strip()
-            if not val:
+            if not val or "more info" in val.lower():
                 continue
-            if "energy" in key or "energie" in key:
+
+            if "energy rating" in key or "energielabel" in key:
                 listing.energy_label = _parse_energy_label(val)
-            elif "bouwjaar" in key or "construction" in key or "built" in key:
-                try:
-                    listing.construction_year = int(re.search(r"\d{4}", val).group())
-                except (AttributeError, ValueError):
-                    pass
-            elif "interior" in key or "interieur" in key or "furnish" in key:
-                listing.interior = val
-            elif "neighborhood" in key or "buurt" in key or "wijk" in key:
-                listing.neighborhood = val
+            elif "year of construction" in key or "bouwjaar" in key:
+                listing.construction_year = _parse_construction_year(val)
+            elif "interior" in key or "interieur" in key:
+                if not listing.interior:
+                    listing.interior = val.split("\n")[0]
+            elif "living area" in key or "woonoppervlak" in key:
+                area = _parse_area(val)
+                if area and not listing.surface_area_m2:
+                    listing.surface_area_m2 = area
+            elif "number of rooms" in key or "aantal kamers" in key:
+                rooms = _parse_rooms(val)
+                if rooms and not listing.num_rooms:
+                    listing.num_rooms = rooms
+            elif "available" in key and not listing.available_from:
+                listing.available_from = val
+            elif "type of house" in key and not listing.property_type:
+                listing.property_type = val.split("\n")[0].lower()
 
-        # Description
-        for sel in ("[class*='description']", "[class*='tekst']", "section[class*='description']"):
-            el = await page.query_selector(sel)
-            if el:
-                listing.description = (await el.inner_text()).strip()
-                break
+        # Description — verified: [class*=description]
+        desc_el = await page.query_selector("[class*=description] p, [class*=description]")
+        if desc_el and not listing.description:
+            listing.description = (await desc_el.inner_text()).strip()
 
-        # Images
-        img_els = await page.query_selector_all("img[src*='pararius']")
+        # Images — look for picture elements
+        img_els = await page.query_selector_all("img.picture__image")
         images = []
-        for img in img_els[:6]:
-            src = await img.get_attribute("src") or await img.get_attribute("data-src") or ""
+        for img in img_els[:8]:
+            src = await img.get_attribute("src") or ""
+            if src and src not in images and "pararius" not in src:
+                # Filter out logos etc. — real listing images are from casco-media-prod CDN
+                pass
             if src and src not in images:
                 images.append(src)
         if images:
-            listing.images = images
+            listing.images = images[:6]
 
     async def close(self) -> None:
+        if self._context:
+            await self._context.close()
+            self._context = None
         if self._browser:
             await self._browser.close()
             self._browser = None

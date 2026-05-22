@@ -75,23 +75,34 @@ class TestExtractPostalCode:
 
 class TestParseAddress:
     def test_simple(self):
-        street, num, add = _parse_address("Keizersgracht 123")
+        prop_type, street, num, add = _parse_address("Keizersgracht 123")
         assert street == "Keizersgracht"
         assert num == "123"
         assert add == ""
 
+    def test_with_property_type_prefix(self):
+        prop_type, street, num, add = _parse_address("Flat Prins Hendrikkade 86 A")
+        assert prop_type == "apartment"
+        assert street == "Prins Hendrikkade"
+        assert num == "86"
+        assert add == "A"
+
     def test_with_letter_addition(self):
-        street, num, add = _parse_address("Keizersgracht 123-A")
-        assert street == "Keizersgracht"
-        assert num == "123"
+        prop_type, street, num, add = _parse_address("Flat Prins Hendrikkade 86 A")
+        assert street == "Prins Hendrikkade"
+        assert num == "86"
         assert add == "A"
 
     def test_multi_word_street(self):
-        street, num, add = _parse_address("Van der Pekstraat 42")
+        prop_type, street, num, add = _parse_address("Van der Pekstraat 42")
         assert "Pekstraat" in street
         assert num == "42"
 
+    def test_studio_type(self):
+        prop_type, street, num, add = _parse_address("Studio Keizersgracht 10")
+        assert prop_type == "studio"
+
     def test_empty(self):
-        street, num, add = _parse_address("")
+        prop_type, street, num, add = _parse_address("")
         assert street == ""
         assert num == ""
