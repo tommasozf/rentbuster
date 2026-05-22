@@ -241,6 +241,12 @@ def calculate_wws(listing: Listing) -> WWSBreakdown:
     else:
         confidence = ConfidenceLevel.VERY_LOW
 
+    # Confidence multipliers for bust_score
+    _CONFIDENCE_MULT = {"HIGH": 1.0, "MEDIUM": 0.8, "LOW": 0.5, "VERY_LOW": 0.3}
+    confidence_mult = _CONFIDENCE_MULT.get(confidence.value, 0.5)
+    woz_mult = 1.0 if listing.woz_verified else 0.7
+    bust_score = (savings or 0) * confidence_mult * woz_mult
+
     # Mutate listing
     listing.wws_points = round(total, 2)
     listing.wws_max_rent = max_rent
@@ -249,5 +255,6 @@ def calculate_wws(listing: Listing) -> WWSBreakdown:
     listing.wws_confidence = confidence
     listing.wws_breakdown = bd.to_dict()
     listing.wws_flags = flags
+    listing.bust_score = round(bust_score, 2)
 
     return bd

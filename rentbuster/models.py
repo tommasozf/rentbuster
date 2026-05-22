@@ -105,6 +105,9 @@ class Listing:
     rb_savings: float | None = None
     rb_confidence: str | None = None
 
+    # Bust score (computed by wws.py)
+    bust_score: float = 0.0
+
     @property
     def address_key(self) -> str:
         return normalize_address(self.street, self.house_number, self.house_number_addition)
@@ -145,4 +148,5 @@ class Listing:
             "rb_estimated_max_rent": self.rb_estimated_max_rent,
             "rb_savings": self.rb_savings,
             "rb_confidence": self.rb_confidence,
+            "bust_score": self.bust_score,
         }

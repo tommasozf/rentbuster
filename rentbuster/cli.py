@@ -42,6 +42,71 @@ def _cmd_init_db(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_top(args: argparse.Namespace) -> int:
+    settings = load_settings()
+    if not settings.database_url:
+        print("error: DATABASE_URL is not set", file=sys.stderr)
+        return 1
+    db = Database(settings.database_url)
+    listings = db.get_top_listings(args.limit)
+    db.close()
+
+    if not listings:
+        print("No bustable listings found.")
+        return 0
+
+    col_widths = {"rank": 4, "address": 35, "asking": 10, "max_rent": 10, "pts": 6, "savings": 10, "conf": 10, "score": 8, "source": 14}
+    header = (
+        f"{'#':<{col_widths['rank']}} "
+        f"{'Address':<{col_widths['address']}} "
+        f"{'Asking':>{col_widths['asking']}} "
+        f"{'Max rent':>{col_widths['max_rent']}} "
+        f"{'Pts':>{col_widths['pts']}} "
+        f"{'Savings':>{col_widths['savings']}} "
+        f"{'Confidence':<{col_widths['conf']}} "
+        f"{'Score':>{col_widths['score']}} "
+        f"{'Source':<{col_widths['source']}}"
+    )
+    sep = "-" * len(header)
+    print(f"\nTop {len(listings)} bustable listings (ranked by bust score)\n")
+    print(header)
+    print(sep)
+
+    for i, r in enumerate(listings, 1):
+        street = r.get("street") or ""
+        num = r.get("house_number") or ""
+        addition = r.get("house_number_addition") or ""
+        addr = f"{street} {num}"
+        if addition:
+            addr += f"-{addition}"
+        city = (r.get("city") or "").title()
+        full_addr = f"{addr}, {city}"
+        asking = r.get("asking_rent") or 0
+        max_rent = r.get("wws_max_rent") or 0
+        pts = r.get("wws_points") or 0
+        savings = r.get("wws_savings") or 0
+        conf = r.get("wws_confidence") or "?"
+        score = r.get("bust_score") or 0
+        source = r.get("source") or "?"
+        url = r.get("url") or ""
+
+        print(
+            f"{i:<{col_widths['rank']}} "
+            f"{full_addr[:col_widths['address']]:<{col_widths['address']}} "
+            f"€{asking:>{col_widths['asking'] - 1}} "
+            f"€{max_rent:>{col_widths['max_rent'] - 1}.0f} "
+            f"{pts:>{col_widths['pts']}.0f} "
+            f"€{savings:>{col_widths['savings'] - 1}.0f} "
+            f"{conf:<{col_widths['conf']}} "
+            f"{score:>{col_widths['score']}.1f} "
+            f"{source:<{col_widths['source']}}"
+        )
+        print(f"     {url}")
+
+    print(sep)
+    return 0
+
+
 def _cmd_list_profiles(args: argparse.Namespace) -> int:
     profiles = sorted(PROFILES_DIR.glob("*.yaml"))
     if not profiles:
@@ -116,6 +181,16 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "init-db", help="run schema.sql against DATABASE_URL to create tables"
     ).set_defaults(func=_cmd_init_db)
+
+    top_parser = subparsers.add_parser("top", help="show top bustable listings ranked by bust score")
+    top_parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        metavar="N",
+        help="number of listings to show (default: 10)",
+    )
+    top_parser.set_defaults(func=_cmd_top)
 
     subparsers.add_parser("list-profiles", help="list available profiles").set_defaults(
         func=_cmd_list_profiles

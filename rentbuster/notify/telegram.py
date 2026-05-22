@@ -91,6 +91,46 @@ class TelegramNotifier:
                 else:
                     self._send(chat_id, "You weren't subscribed.")
 
+            elif text.startswith("/top"):
+                # Only subscribed users can query
+                subscribers = self.db.get_telegram_subscribers()
+                if chat_id not in subscribers:
+                    self._send(chat_id, "🔒 Subscribe first with <code>/start yourpassword</code>")
+                    continue
+                parts = text.split(maxsplit=1)
+                try:
+                    n = int(parts[1]) if len(parts) > 1 else 5
+                    n = max(1, min(n, 20))
+                except ValueError:
+                    n = 5
+                listings = self.db.get_top_listings(n)
+                if not listings:
+                    self._send(chat_id, "No bustable listings found yet.")
+                    continue
+                lines = [f"🏆 Top {len(listings)} bustable listings\n"]
+                for i, r in enumerate(listings, 1):
+                    street = r.get("street") or ""
+                    num = r.get("house_number") or ""
+                    addition = r.get("house_number_addition") or ""
+                    addr = f"{street} {num}"
+                    if addition:
+                        addr += f"-{addition}"
+                    city = (r.get("city") or "").title()
+                    asking = r.get("asking_rent") or 0
+                    max_rent = r.get("wws_max_rent") or 0
+                    pts = r.get("wws_points") or 0
+                    savings = r.get("wws_savings") or 0
+                    conf = r.get("wws_confidence") or "?"
+                    source = r.get("source") or "?"
+                    url = r.get("url") or ""
+                    lines.append(
+                        f"{i}. {addr}, {city}\n"
+                        f"   €{asking}/mo asking → €{max_rent:.0f}/mo max ({pts:.0f} pts)\n"
+                        f"   💸 Save €{savings:.0f}/mo | 📊 {conf} | 📡 {source}\n"
+                        f'   🔗 <a href="{url}">View</a>\n'
+                    )
+                self._send(chat_id, "\n".join(lines))
+
     def send_listings(self, listings: list[Listing]) -> None:
         subscribers = self.db.get_telegram_subscribers()
         if not subscribers:
@@ -139,5 +179,6 @@ class TelegramNotifier:
             f"📐 {size_info}  |  ⚡ Label {energy}  |  WOZ {woz_info}\n"
             f"📊 Confidence: {conf}\n\n"
             f"⚠️ Verify with Huurcommissie before disputing\n"
+            f"📡 Source: {listing.source.value}\n"
             f'🔗 <a href="{listing.url}">View listing</a>'
         )

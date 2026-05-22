@@ -53,6 +53,9 @@ CREATE TABLE IF NOT EXISTS listings (
     rb_savings               REAL,
     rb_confidence            TEXT,
 
+    -- Bust score
+    bust_score               REAL DEFAULT 0,
+
     -- Timestamps
     first_seen_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_seen_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -71,6 +74,7 @@ CREATE INDEX IF NOT EXISTS idx_listings_wws_points      ON listings (wws_points)
 CREATE INDEX IF NOT EXISTS idx_listings_first_seen      ON listings (first_seen_at);
 CREATE INDEX IF NOT EXISTS idx_listings_last_seen       ON listings (last_seen_at);
 CREATE INDEX IF NOT EXISTS idx_listings_active          ON listings (disappeared_at) WHERE disappeared_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_listings_bust_score      ON listings (bust_score DESC) WHERE wws_is_bustable = TRUE;
 
 -- ── WOZ cache ────────────────────────────────────────────────────────
 

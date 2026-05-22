@@ -31,6 +31,7 @@ INSERT INTO listings (
     wws_confidence, wws_breakdown, wws_flags,
     woz_value, woz_reference_date, woz_verified,
     rb_estimated_max_rent, rb_savings, rb_confidence,
+    bust_score,
     first_seen_at, last_seen_at
 ) VALUES (
     %(source)s, %(source_id)s, %(url)s,
@@ -43,6 +44,7 @@ INSERT INTO listings (
     %(wws_confidence)s, %(wws_breakdown)s, %(wws_flags)s,
     %(woz_value)s, %(woz_reference_date)s, %(woz_verified)s,
     %(rb_estimated_max_rent)s, %(rb_savings)s, %(rb_confidence)s,
+    %(bust_score)s,
     NOW(), NOW()
 )
 ON CONFLICT (source, source_id) DO UPDATE SET
@@ -58,6 +60,7 @@ ON CONFLICT (source, source_id) DO UPDATE SET
     woz_verified        = EXCLUDED.woz_verified,
     rb_estimated_max_rent = EXCLUDED.rb_estimated_max_rent,
     rb_savings          = EXCLUDED.rb_savings,
+    bust_score          = EXCLUDED.bust_score,
     last_seen_at        = NOW(),
     disappeared_at      = NULL,
     updated_at          = NOW()
@@ -236,11 +239,53 @@ class Database:
             log.warning("remove subscriber failed: %s", exc)
             return False
 
+    # ── Top listings ──
+
+    def get_top_listings(self, limit: int = 5) -> list[dict]:
+        """Return the top bustable listings ranked by bust_score."""
+        try:
+            with self._cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT source, source_id, url, street, house_number, house_number_addition,
+                           postal_code, city, asking_rent, surface_area_m2, num_rooms,
+                           energy_label, wws_points, wws_max_rent, wws_savings, wws_confidence,
+                           woz_value, woz_verified, bust_score, first_seen_at, available_from
+                    FROM listings
+                    WHERE wws_is_bustable = TRUE AND disappeared_at IS NULL
+                    ORDER BY bust_score DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+                cols = [desc[0] for desc in cur.description]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+        except Exception as exc:
+            log.warning("get_top_listings failed: %s", exc)
+            return []
+
     # ── Schema init ──
+
+    def migrate(self) -> None:
+        """Apply incremental schema migrations (idempotent ALTER TABLE statements)."""
+        migrations = [
+            "ALTER TABLE listings ADD COLUMN IF NOT EXISTS bust_score REAL DEFAULT 0",
+            (
+                "CREATE INDEX IF NOT EXISTS idx_listings_bust_score "
+                "ON listings (bust_score DESC) WHERE wws_is_bustable = TRUE"
+            ),
+        ]
+        with self._cursor() as cur:
+            for stmt in migrations:
+                try:
+                    cur.execute(stmt)
+                except Exception as exc:
+                    log.warning("migration failed (%s): %s", stmt[:60], exc)
 
     def init_schema(self, schema_sql: str) -> None:
         with self._cursor() as cur:
             cur.execute(schema_sql)
+        self.migrate()
 
     def close(self) -> None:
         if self._conn and not self._conn.closed:
