@@ -37,6 +37,7 @@ class SearchConfig:
     city: str = "amsterdam"
     max_rent: int = 2500
     min_size: int = 0
+    max_rooms: int = 0
     property_types: list[str] = field(default_factory=lambda: ["apartment", "studio"])
     pararius_max_pages: int = 5
     rentbuster_nl_max_pages: int = 10
@@ -47,6 +48,7 @@ class SearchConfig:
             city=str(data.get("city", "amsterdam")),
             max_rent=int(data.get("max_rent", 2500)),
             min_size=int(data.get("min_size", 0)),
+            max_rooms=int(data.get("max_rooms", 0)),
             property_types=list(data.get("property_types") or ["apartment", "studio"]),
             pararius_max_pages=int(data.get("pararius_max_pages", 5)),
             rentbuster_nl_max_pages=int(data.get("rentbuster_nl_max_pages", 10)),

@@ -31,6 +31,8 @@ def build_sources(settings, profile) -> list[ListingSource]:
                 city=search.city,
                 max_rent=search.max_rent,
                 min_size=search.min_size,
+                max_rooms=search.max_rooms,
+                property_types=search.property_types,
                 max_pages=search.pararius_max_pages,
                 headless=settings.playwright_headless,
                 detail_delay=settings.detail_fetch_delay,

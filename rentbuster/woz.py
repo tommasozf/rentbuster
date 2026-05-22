@@ -134,12 +134,21 @@ def estimate_woz(city: str, surface_area_m2: int) -> WOZResult:
     )
 
 
-def lookup_woz(listing: Listing, api_key: str | None = None) -> WOZResult:
+_shared_session: requests.Session | None = None
+
+
+def _get_session() -> requests.Session:
+    global _shared_session
+    if _shared_session is None:
+        _shared_session = requests.Session()
+    return _shared_session
+
+
+def lookup_woz(listing: Listing) -> WOZResult:
     """Resolve WOZ value for a listing; mutates listing WOZ fields.
 
     If listing already has a woz_value (e.g. from rent-buster.nl), skips lookup.
     Falls back to per-m² estimate if Kadaster lookup fails.
-    The api_key parameter is ignored (API is free); kept for config compatibility.
     """
     if listing.woz_value and listing.woz_verified:
         return WOZResult(
@@ -156,6 +165,7 @@ def lookup_woz(listing: Listing, api_key: str | None = None) -> WOZResult:
             postal_code=listing.postal_code,
             house_number=listing.house_number,
             addition=listing.house_number_addition,
+            session=_get_session(),
         )
 
     if result is None:

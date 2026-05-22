@@ -68,11 +68,20 @@ class RentBuster:
                 self.db.log_scrape_run("all", 0, 0, 0, "no listings")
             return
 
-        # 2. Deduplicate by address
+        # 2. Apply profile filters (rooms, property type)
+        before = len(all_listings)
+        all_listings = self._apply_search_filters(all_listings)
+        if len(all_listings) < before:
+            log.info("filtered %d → %d listings (max_rooms=%s, types=%s)",
+                     before, len(all_listings),
+                     self.profile.search.max_rooms or "any",
+                     self.profile.search.property_types or "any")
+
+        # 3. Deduplicate by address
         deduped = deduplicate(all_listings)
         log.info("total=%d after dedup=%d", len(all_listings), len(deduped))
 
-        # 3. Filter new listings
+        # 4. Filter new listings
         new_listings = [
             l for l in deduped
             if (l.source.value, l.source_id) not in self.seen_ids
@@ -87,11 +96,17 @@ class RentBuster:
                 self.db.mark_disappeared()
             return
 
-        # 4. WOZ lookup (check DB cache first)
-        for listing in new_listings:
+        # 5. WOZ lookup (check DB cache first)
+        need_woz = [l for l in new_listings if not (l.woz_value and l.woz_verified)]
+        if need_woz:
+            log.info("WOZ lookup for %d listings (skipping %d with verified WOZ)...",
+                     len(need_woz), len(new_listings) - len(need_woz))
+        for i, listing in enumerate(new_listings):
             self._resolve_woz(listing)
+            if need_woz and (i + 1) % 50 == 0:
+                log.info("  WOZ progress: %d/%d", i + 1, len(new_listings))
 
-        # 5. Calculate WWS points
+        # 6. Calculate WWS points
         for listing in new_listings:
             calculate_wws(listing)
             log.debug(
@@ -103,7 +118,7 @@ class RentBuster:
                 listing.wws_is_bustable,
             )
 
-        # 6. Persist all new listings
+        # 7. Persist all new listings
         if self.db and not self.dry_run:
             for listing in new_listings:
                 self.db.upsert_listing(listing)
@@ -112,7 +127,7 @@ class RentBuster:
                 [l.source_id for l in deduped],
             )
 
-        # 7. Filter bustable listings
+        # 8. Filter bustable listings
         bustable = [
             l for l in new_listings
             if l.wws_is_bustable
@@ -136,17 +151,28 @@ class RentBuster:
                 l.wws_confidence.value if l.wws_confidence else "?",
             )
 
-        # 8. Notify
+        # 9. Notify
         if bustable:
             if self.dry_run:
                 log.info("dry-run: skipping notifications for %d bustable listings", len(bustable))
             else:
                 self.notifiers.send_listings(bustable)
 
-        # 9. Cleanup
+        # 10. Cleanup
         if self.db and not self.dry_run:
             self.db.mark_disappeared()
             self.db.log_scrape_run("all", len(all_listings), len(new_listings), len(bustable))
+
+    def _apply_search_filters(self, listings: list[Listing]) -> list[Listing]:
+        search = self.profile.search
+        result = []
+        for l in listings:
+            if search.max_rooms and l.num_rooms > search.max_rooms:
+                continue
+            if search.property_types and l.property_type and l.property_type not in search.property_types:
+                continue
+            result.append(l)
+        return result
 
     def _resolve_woz(self, listing: Listing) -> None:
         """Check DB cache, then Kadaster API, then estimate."""

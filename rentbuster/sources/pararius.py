@@ -127,6 +127,8 @@ class ParariusSource:
         city: str = "amsterdam",
         max_rent: int = 0,
         min_size: int = 0,
+        max_rooms: int = 0,
+        property_types: list[str] | None = None,
         max_pages: int = 5,
         headless: bool = True,
         detail_delay: float = 2.0,
@@ -135,12 +137,13 @@ class ParariusSource:
         self.city = city.lower()
         self.max_rent = max_rent
         self.min_size = min_size
+        self.max_rooms = max_rooms
+        self.property_types = set(property_types) if property_types else set()
         self.max_pages = max_pages
         self.headless = headless
         self.detail_delay = detail_delay
         self.fetch_details = fetch_details
         self._browser = None
-        self._context = None
         self._playwright = None
 
     def _build_search_url(self, page: int = 1) -> str:
@@ -151,6 +154,11 @@ class ParariusSource:
             path += f"/page-{page}"
         return f"{BASE_URL}{path}"
 
+    _UA = (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    )
+
     async def _ensure_browser(self):
         if self._browser is not None:
             return
@@ -159,40 +167,28 @@ class ParariusSource:
 
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(headless=self.headless)
-        self._context = await self._browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-            ),
-            viewport={"width": 1280, "height": 800},
-        )
-        # Apply stealth to all new pages in this context
         self._stealth = Stealth()
         log.debug("pararius: browser launched")
 
-    async def _new_page(self):
+    async def _fresh_page(self, url: str) -> tuple:
+        """Open url in a fresh browser context (bypasses Cloudflare per-session limits).
+
+        Returns (context, page) — caller must close the context when done.
+        """
         await self._ensure_browser()
-        page = await self._context.new_page()
+        ctx = await self._browser.new_context(
+            user_agent=self._UA,
+            viewport={"width": 1280, "height": 800},
+        )
+        page = await ctx.new_page()
         await self._stealth.apply_stealth_async(page)
         page.set_default_timeout(30_000)
-        return page
-
-    async def _get_page(self, url: str, wait_for_listings: bool = False):
-        page = await self._new_page()
         try:
             await page.goto(url, wait_until="domcontentloaded")
-            if wait_for_listings:
-                try:
-                    await page.wait_for_selector(
-                        "li.search-list__item--listing", timeout=12_000
-                    )
-                except Exception:
-                    await asyncio.sleep(3)  # fallback if no listings found
-            else:
-                await asyncio.sleep(2)
+            await asyncio.sleep(3)
         except Exception as exc:
             log.warning("pararius: page load issue for %s: %s", url, exc)
-        return page
+        return ctx, page
 
     async def fetch_listings(self) -> list[Listing]:
         listings: list[Listing] = []
@@ -203,9 +199,11 @@ class ParariusSource:
             log.info("pararius: fetching page %d — %s", page_num, url)
 
             try:
-                page = await self._get_page(url, wait_for_listings=True)
-                page_listings = await self._parse_listing_cards(page)
-                await page.close()
+                ctx, page = await self._fresh_page(url)
+                try:
+                    page_listings = await self._parse_listing_cards(page)
+                finally:
+                    await ctx.close()
             except Exception as exc:
                 log.error("pararius: error on page %d: %s", page_num, exc)
                 break
@@ -224,15 +222,24 @@ class ParariusSource:
                 await asyncio.sleep(random.uniform(2.0, 5.0))
 
         if self.fetch_details and listings:
-            log.info("pararius: fetching details for %d listings", len(listings))
-            for listing in listings:
-                try:
-                    await self.fetch_listing_details(listing)
-                except Exception as exc:
-                    log.warning("pararius: detail fetch failed for %s: %s", listing.source_id, exc)
-                await asyncio.sleep(random.uniform(1.0, self.detail_delay))
+            detail_candidates = [l for l in listings if self._worth_detail_fetch(l)]
+            skipped = len(listings) - len(detail_candidates)
+            if skipped:
+                log.info("pararius: skipped %d listings (filters), fetching details for %d (5 parallel)", skipped, len(detail_candidates))
+            else:
+                log.info("pararius: fetching details for %d listings (5 parallel)", len(detail_candidates))
+            sem = asyncio.Semaphore(5)
+            tasks = [self._fetch_detail(l, sem) for l in detail_candidates]
+            await asyncio.gather(*tasks)
 
         return listings
+
+    def _worth_detail_fetch(self, listing: Listing) -> bool:
+        if self.property_types and listing.property_type not in self.property_types:
+            return False
+        if self.max_rooms and listing.num_rooms > self.max_rooms:
+            return False
+        return True
 
     async def _parse_listing_cards(self, page) -> list[Listing]:
         # Verified selector: li.search-list__item--listing (2026-05-22)
@@ -333,13 +340,15 @@ class ParariusSource:
             images=images,
         )
 
-    async def fetch_listing_details(self, listing: Listing) -> None:
-        """Visit the detail page and enrich listing with energy label, year, description, etc."""
-        page = await self._get_page(listing.url)
-        try:
-            await self._parse_detail_page(page, listing)
-        finally:
-            await page.close()
+    async def _fetch_detail(self, listing: Listing, sem: asyncio.Semaphore) -> None:
+        async with sem:
+            ctx, page = await self._fresh_page(listing.url)
+            try:
+                await self._parse_detail_page(page, listing)
+            except Exception as exc:
+                log.warning("pararius: detail fetch failed for %s: %s", listing.source_id, exc)
+            finally:
+                await ctx.close()
 
     async def _parse_detail_page(self, page, listing: Listing) -> None:
         # Postal code + neighborhood from detail — verified: .listing-detail-summary__location
@@ -411,9 +420,6 @@ class ParariusSource:
             listing.images = images[:6]
 
     async def close(self) -> None:
-        if self._context:
-            await self._context.close()
-            self._context = None
         if self._browser:
             await self._browser.close()
             self._browser = None
