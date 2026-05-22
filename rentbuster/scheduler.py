@@ -163,7 +163,7 @@ class RentBuster:
                 listing.woz_verified = cached["verified"]
                 return
 
-        result = lookup_woz(listing, self.settings.kadaster_api_key)
+        result = lookup_woz(listing)
 
         # Cache the result
         if self.db and listing.postal_code and listing.house_number:

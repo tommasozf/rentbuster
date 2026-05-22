@@ -23,25 +23,8 @@ jobs:
       - name: Install deps
         run: uv sync --frozen --extra dev --python ${{ matrix.python-version }}
       - name: Ruff lint
-        run: uv run ruff check radar scripts tests
+        run: uv run ruff check rentbuster tests
       - name: Ruff format check
-        run: uv run ruff format --check radar scripts tests
+        run: uv run ruff format --check rentbuster tests
       - name: Tests
         run: uv run pytest -q
-
-  dashboard:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./dashboard
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: dashboard/package-lock.json
-      - run: npm ci
-      - run: npm run lint
-      - name: Build
-        run: npm run build

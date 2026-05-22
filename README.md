@@ -1,164 +1,236 @@
-<div align="center">
+# RentBuster
 
-# 📡 Kamernet Radar
+Scrapes Pararius and rent-buster.nl for Amsterdam (or any Dutch city) rental listings, calculates the legal maximum rent using the WWS (Woningwaarderingsstelsel) points system, and sends you a notification whenever a listing is asking more than it's legally allowed to.
 
-**Real-time Kamernet rental listing scraper with LLM-powered scoring and notifications anywhere.**
-
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Next.js 16](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org/)
-[![Docker ready](https://img.shields.io/badge/docker-ready-2496ED.svg)](./Dockerfile)
-[![Apprise-powered](https://img.shields.io/badge/apprise-100%2B_channels-ff6600.svg)](https://github.com/caronc/apprise)
-
-<sub>Self-hostable. Not affiliated with Kamernet B.V. Educational / personal use.</sub>
-
-</div>
+No AI, no paid APIs, no subscriptions. Everything runs free.
 
 ---
 
-Finding a place to rent on [Kamernet.nl](https://kamernet.nl) is brutal. Good listings vanish in minutes. **Kamernet Radar** watches the site for you, scores each new listing against your preferences with a local or free LLM, and pings you the moment something good drops. Choose Discord, Telegram, WhatsApp, ntfy, email, Slack, or any of 100+ other channels.
+## How it works
 
-> _"I set it up in five minutes and had a notification for a good €1450 studio on my phone within an hour. Would recommend."_  
-> — every user, eventually, hopefully
+1. **Scrapes** Pararius (Playwright + stealth) and rent-buster.nl (plain HTTP) every 2–5 minutes
+2. **Looks up WOZ value** via the free public Kadaster API (PDOK geocoding → LV-WOZ)
+3. **Calculates WWS points** using the 2025 Huurcommissie rules — surface area, WOZ, energy label, rooms, outdoor space, etc.
+4. **Flags bustable listings** where asking rent > legal maximum (threshold: 187 points)
+5. **Notifies you** via Telegram, Discord, or any Apprise channel
 
-## What it does
+rent-buster.nl listings come with pre-computed WWS points and max rents already attached — those go straight through without needing a WOZ lookup.
 
-- 🔍 **Polite, robots.txt-compliant scraping.** Public HTML pages only, rate-limited, with a transparent User-Agent.
-- 🤖 **LLM scoring 0–100** via [OpenRouter](https://openrouter.ai) (free models work). Rubrics live in editable YAML.
-- 📬 **Notify anywhere.** Native Discord rich embeds, Telegram with a password-gated subscriber flow, or Apprise for 100+ channels.
-- 🎯 **Preset profiles.** `student-amsterdam`, `young-professional-randstad`, `family-utrecht`, `generic`. Copy and tweak.
-- 📊 **Optional Next.js dashboard.** Filter, sort, chart, and drill into listings. Runs locally.
-- 🐳 **Docker-first.** `docker compose up` and you're running.
-- 🗃️ **Postgres-backed.** Full listing history, price snapshots, scrape audit log.
+---
 
-## Quick start
+## Quick start (local)
 
-<details open>
-<summary><b>Option A: Docker (recommended)</b></summary>
+Requires Python 3.10+ and the `rentbuster` conda environment (or any venv with deps installed).
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/kamernet-radar
-cd kamernet-radar
-cp .env.example .env               # edit at least APPRISE_URLS or DISCORD_WEBHOOK_URL
-docker compose up -d db            # start Postgres
-docker compose run --rm scraper init-db   # one-time schema bootstrap
-docker compose up scraper          # start scraping
+git clone <this-repo>
+cd rentbuster
+
+# Install deps (pick one)
+conda activate rentbuster
+# or: pip install .
+# or: uv sync
+
+# Install Playwright's Chromium (required for Pararius)
+playwright install chromium
+
+# Copy and fill in config
+cp .env.example .env
+# Edit .env: set at least one of DISCORD_WEBHOOK_URL or TELEGRAM_BOT_TOKEN
+
+# One-shot dry run (no notifications, no DB writes — just shows what it finds)
+python -m rentbuster -v run --once --dry-run
+
+# Run continuously (checks every 2–5 minutes)
+python -m rentbuster run
 ```
 
-Want the dashboard too?
+---
+
+## Notifications setup
+
+### Discord (easiest)
+
+1. Open the Discord server where you want alerts
+2. Edit any channel → **Integrations** → **Webhooks** → **New Webhook**
+3. Copy the webhook URL
+4. In `.env`: `DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...`
+
+You'll get a rich embed with address, asking rent, legal max, savings, energy label, and a link to the listing.
+
+### Telegram (recommended for mobile)
+
+**Step 1 — create a bot:**
+
+1. Open Telegram and search for **@BotFather**
+2. Send `/newbot`
+3. Pick a name (e.g. "RentBuster") and a username (e.g. `myrb_bot`)
+4. BotFather replies with a token like `7123456789:AAF...`
+
+**Step 2 — configure:**
 
 ```bash
-docker compose --profile dashboard up
-# → http://127.0.0.1:3000
+# In .env:
+TELEGRAM_BOT_TOKEN=7123456789:AAF...
+TELEGRAM_PASSWORD=somesecretword   # anything you like
 ```
 
-</details>
+**Step 3 — subscribe:**
 
-<details>
-<summary><b>Option B: Terminal only (no Docker)</b></summary>
+Once the scraper is running, open your bot in Telegram and send:
+```
+/start somesecretword
+```
 
-Requires Python 3.10+ and access to a Postgres instance.
+That's it. Every bustable listing will land in your Telegram DMs. The password gates it so nobody else can subscribe.
+
+### Apprise (ntfy, Pushover, Slack, email, etc.)
+
+Set `APPRISE_URLS` to a comma-separated list of [Apprise URLs](https://github.com/caronc/apprise/wiki):
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/kamernet-radar
-cd kamernet-radar
+# ntfy (free, self-hostable, great phone app)
+APPRISE_URLS=ntfy://mytopic
 
-# One-time: install uv (https://docs.astral.sh/uv/getting-started/installation/)
-uv sync                            # creates .venv, installs from uv.lock
+# Pushover (paid, excellent mobile app)
+APPRISE_URLS=pover://UserKey@AppKey
 
-cp .env.example .env               # edit DATABASE_URL + one notification channel
-uv run python -m radar init-db     # run schema.sql
-uv run python -m radar run         # scrape forever
+# Multiple channels at once
+APPRISE_URLS=ntfy://mytopic,pover://UserKey@AppKey
 ```
 
-One-shot dry-run (skips notifications and DB writes, handy for tuning your profile):
-
-```bash
-uv run python -m radar run --once --dry-run --profile student-amsterdam
-```
-
-Prefer plain pip? `pip install .` works — `pyproject.toml` declares the same dependencies.
-
-</details>
-
-<details>
-<summary><b>Option C: No notifications, database only</b></summary>
-
-Leave every notifier env var blank. The scraper writes to Postgres silently. Pair it with the dashboard for a private searchable archive.
-
-</details>
+---
 
 ## Configuration
 
-Environment variables (or `.env`) control behavior. Full list with comments: **[`.env.example`](./.env.example)**.
+Copy `.env.example` to `.env` and set what you need. Nothing is required — without a notification URL it just logs to stdout, and without `DATABASE_URL` it runs without persistence (re-notifies everything on restart).
 
-| Variable                                    | Required | Purpose                                                         |
-| ------------------------------------------- | :------: | --------------------------------------------------------------- |
-| `DATABASE_URL`                              |    ✖️    | Postgres connection. Without it, no persistence.                |
-| `PROFILE`                                   |    ✖️    | Profile name (default: `generic`).                              |
-| `OPENROUTER_API_KEY`                        |    ✖️    | Enables AI scoring. Free tier works fine.                       |
-| `DISCORD_WEBHOOK_URL`                       |    ✖️    | Native Discord rich-embed notifications.                        |
-| `TELEGRAM_BOT_TOKEN` + `TELEGRAM_PASSWORD`  |    ✖️    | Telegram bot with `/start <password>` subscription.             |
-| `APPRISE_URLS`                              |    ✖️    | Any of 100+ channels (Slack, ntfy, WhatsApp, email, Pushover).  |
-| `CHECK_INTERVAL_MIN/MAX`                    |    ✖️    | Seconds between checks (randomized, default 50-70).             |
+| Variable | Default | Purpose |
+|---|---|---|
+| `PROFILE` | `amsterdam` | Search profile (see `profiles/`) |
+| `DATABASE_URL` | — | Postgres URL. Required for persistence and Telegram subscribers |
+| `PARARIUS_ENABLED` | `true` | Scrape Pararius (Playwright-based) |
+| `PARARIUS_MAX_PAGES` | `5` | How many search result pages to scrape |
+| `PLAYWRIGHT_HEADLESS` | `true` | Set `false` to watch the browser |
+| `FETCH_DETAILS` | `true` | Visit each listing's detail page for energy label, postal code etc. |
+| `RENTBUSTER_NL_ENABLED` | `true` | Scrape rent-buster.nl (HTTP-based, faster) |
+| `RENTBUSTER_NL_MAX_PAGES` | `10` | Pages to scrape from rent-buster.nl |
+| `WWS_BUSTABLE_ONLY` | `true` | Only notify on bustable listings |
+| `WWS_MIN_SAVINGS` | `50` | Minimum €/month savings to trigger a notification |
+| `DISCORD_WEBHOOK_URL` | — | Discord webhook URL |
+| `TELEGRAM_BOT_TOKEN` | — | Telegram bot token (from @BotFather) |
+| `TELEGRAM_PASSWORD` | — | Password users send with `/start` to subscribe |
+| `APPRISE_URLS` | — | Comma-separated Apprise URLs |
+| `CHECK_INTERVAL_MIN` | `120` | Minimum seconds between scrape cycles |
+| `CHECK_INTERVAL_MAX` | `300` | Maximum seconds between scrape cycles |
 
-Configure at least one notification channel, otherwise listings go to the database silently. None are required.
+---
 
-## Scoring profiles
+## Profiles
 
-A profile controls two things: what gets scraped (city, radius, price cap) and how the LLM scores listings. Four ship out of the box:
+A profile sets the city, max rent filter, and WWS defaults. The built-in `amsterdam` profile is at `profiles/amsterdam.yaml`. Copy and edit it for other cities:
 
-| Profile                        | Who it's for                                                    |
-| ------------------------------ | --------------------------------------------------------------- |
-| `generic`                      | Neutral universal defaults. Start here.                         |
-| `student-amsterdam`            | Two students/young adults near VU Amsterdam, budget ~€2000/mo.  |
-| `young-professional-randstad`  | Solo professional, €1800–2500, Randstad-wide.                   |
-| `family-utrecht`               | Family of 4, Utrecht + suburbs, 2+ bedrooms, long-term only.    |
+```yaml
+name: rotterdam
+description: Rotterdam bustable listings under €2000/mo
 
-Writing your own takes two minutes of YAML. See **[`docs/PROFILES.md`](./docs/PROFILES.md)**.
+search:
+  city: rotterdam
+  max_rent: 2000
+  pararius_max_pages: 5
+  rentbuster_nl_max_pages: 10
 
-## Notifications
+wws:
+  bustable_only: true
+  min_savings: 50
+```
 
-Pick any channel. The scraper fans out to all configured notifiers:
+Pass it with `--profile rotterdam` or set `PROFILE=rotterdam` in `.env`.
 
-- 🔵 **Discord.** Rich embeds with images, price, availability, AI score. Set `DISCORD_WEBHOOK_URL`.
-- ✈️ **Telegram.** Personal bot with password-gated subscriptions. Users send `/start <password>`. Set `TELEGRAM_BOT_TOKEN` + `TELEGRAM_PASSWORD`.
-- 🌈 **Apprise.** One env var, 100+ channels: Slack, ntfy, email, WhatsApp (via Twilio), Pushover, Matrix, Home Assistant, and more. Set `APPRISE_URLS`.
+---
 
-All three can coexist. A high-scoring listing fans out to each configured channel. Channel recipes live in **[`docs/NOTIFICATIONS.md`](./docs/NOTIFICATIONS.md)**.
+## Running 24/7
 
-## Dashboard
+Your PC needs to stay on, or run it on a server.
 
-The optional Next.js dashboard shows listing history, trends, top-scored picks, and landlord leaderboards. Run it locally with `npm run dev` or `docker compose --profile dashboard up`. See **[`dashboard/README.md`](./dashboard/README.md)**.
+### Option A: tmux on your PC (simple)
 
-<!-- TODO(community): add a screenshot here. See issue #1 for contribution notes. -->
+```bash
+tmux new -s rentbuster
+conda activate rentbuster
+python -m rentbuster run
+# Ctrl+B, D  →  detach (keeps running)
+# tmux attach -t rentbuster  →  re-attach later
+```
 
-## Deployment
+### Option B: systemd on a VPS (reliable)
 
-Local use needs nothing beyond the quick-start. To run Radar 24/7 on a tiny VPS (€4/mo is plenty), read **[`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md)**. It covers `docker compose` on a plain VPS, Coolify, Railway, and fly.io.
+A Hetzner CAX11 (arm64, €3.79/mo) or CX22 (€4.35/mo) is plenty — the scraper needs ~500 MB RAM for Playwright.
 
-## Contributing
+```bash
+# On the VPS, after cloning and installing deps:
+sudo nano /etc/systemd/system/rentbuster.service
+```
 
-Pull requests welcome. Especially valuable:
+```ini
+[Unit]
+Description=RentBuster
+After=network.target
 
-- 📝 **New preset profiles.** Your city or situation isn't covered? Copy `profiles/generic.yaml` and send a PR.
-- 🌐 **Notification recipes.** Add Apprise recipes for channels we haven't covered.
-- 🧭 **Provider plugins.** Abstract the scraper to target Pararius, Funda, or HousingAnywhere.
-- 🎨 **Dashboard polish.** Map view, websocket live updates, browser extension.
+[Service]
+User=youruser
+WorkingDirectory=/opt/rentbuster
+EnvironmentFile=/opt/rentbuster/.env
+ExecStart=/opt/rentbuster/.venv/bin/python -m rentbuster run
+Restart=always
+RestartSec=30
 
-See **[`CONTRIBUTING.md`](./CONTRIBUTING.md)** for dev setup and the roadmap.
+[Install]
+WantedBy=multi-user.target
+```
 
-## Legal & ethical notice
+```bash
+sudo systemctl enable --now rentbuster
+sudo journalctl -fu rentbuster   # follow logs
+```
 
-This project is **not affiliated with Kamernet B.V.** Use it for personal, educational, non-commercial purposes.
+### Option C: Docker
 
-- The scraper respects [Kamernet's `robots.txt`](https://kamernet.nl/robots.txt). It hits the public HTML search pages and avoids the disallowed API endpoints (`/SearchRooms/GetRooms`, `/ajax/`, etc.). Pull requests that weaken this get rejected.
-- The scraper rate-limits requests with jittered intervals (default 50–70s).
-- You are responsible for complying with Kamernet's Terms of Service and applicable law (including EU GDPR if you process personal data).
-- Use a transparent User-Agent with a link back to this repo (default template in `.env.example`).
+```bash
+cp .env.example .env   # fill in your values
+docker compose up -d db
+docker compose run --rm rentbuster python -m rentbuster init-db
+docker compose up -d rentbuster
+docker compose logs -f rentbuster
+```
 
-If you're on the Kamernet operations team and this causes trouble, open an issue and let's talk. One HTML fetch per minute per user puts less pressure on your servers than a motivated human refreshing the site.
+The `docker-compose.yml` includes Postgres. For Pararius, Playwright needs its Chromium deps — the `Dockerfile` installs them.
 
-## License
+---
 
-[MIT](./LICENSE). Do whatever you want, no warranty.
+## Database (optional)
+
+Without `DATABASE_URL` the scraper works fine but has no memory — it will re-notify you about the same listings after a restart. With Postgres it tracks what it's seen, caches WOZ lookups, and is required for Telegram subscriber persistence.
+
+```bash
+# Start a local Postgres (Docker)
+docker run -d --name pg \
+  -e POSTGRES_PASSWORD=rentbuster \
+  -e POSTGRES_USER=rentbuster \
+  -e POSTGRES_DB=rentbuster \
+  -p 5432:5432 postgres:16
+
+# In .env:
+DATABASE_URL=postgres://rentbuster:rentbuster@localhost:5432/rentbuster
+
+# Bootstrap schema (run once)
+python -m rentbuster init-db
+```
+
+---
+
+## Legal
+
+This tool is for personal, non-commercial use. It scrapes public listing data at a polite rate (one cycle every 2–5 minutes). The WWS calculation is an estimate — for an actual Huurcommissie case, verify the points yourself using the [official Huurprijscheck](https://www.huurcommissie.nl/huurders/sociale-huurwoning/huurprijscheck).
+
+Not affiliated with Pararius, rent-buster.nl, or Huurcommissie.
