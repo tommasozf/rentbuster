@@ -102,6 +102,7 @@ def _item_to_listing(item: dict[str, Any]) -> Listing | None:
         woz_value = int(item.get("woz") or 0) or None
     except (TypeError, ValueError):
         woz_value = None
+    woz_verified = woz_value is not None  # rent-buster.nl provides real WOZ from Kadaster
 
     try:
         build_year = int(item.get("buildYear") or 0) or None
@@ -148,6 +149,7 @@ def _item_to_listing(item: dict[str, Any]) -> Listing | None:
         interior=interior,
         energy_label=energy_label,
         woz_value=woz_value,
+        woz_verified=woz_verified,
         construction_year=build_year,
         wws_points=wws_points,
         rb_estimated_max_rent=rb_max,
@@ -188,7 +190,7 @@ class RentbusterNLSource:
     def _fetch_page_rsc(self, page: int) -> str | None:
         url = f"{BASE_URL}/feed?city={self._city_param}&page={page}"
         try:
-            resp = self._session.get(url, timeout=30)
+            resp = self._session.get(url, timeout=(8, 20))  # (connect, read)
             resp.raise_for_status()
             return resp.text
         except requests.RequestException as exc:
@@ -197,10 +199,10 @@ class RentbusterNLSource:
 
     def _parse_rsc(self, rsc_text: str) -> list[Listing]:
         """Extract listing objects from RSC streaming payload."""
+        import json
         listings = []
         for raw in _LISTING_RE.findall(rsc_text):
             try:
-                import json
                 item = json.loads(raw)
                 listing = _item_to_listing(item)
                 if listing:
