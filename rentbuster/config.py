@@ -29,9 +29,6 @@ class Settings(BaseSettings):
     fetch_details: bool = True
     detail_fetch_delay: float = 2.0
 
-    # ── Kadaster WOZ API ──
-    kadaster_api_key: str | None = None
-
     # ── WWS filtering ──
     wws_bustable_only: bool = True
     wws_min_savings: int = 50  # minimum EUR/month savings to notify

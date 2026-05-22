@@ -1,4 +1,12 @@
-"""WOZ value lookup — Kadaster API with conservative estimate fallback."""
+"""WOZ value lookup via public APIs.
+
+Two-step lookup (no API key required):
+  1. PDOK locatieserver → nummeraanduiding_id (BAG address ID)
+  2. Kadaster LV-WOZ API → WOZ value for that address
+
+Both APIs are public, free, and require no registration.
+Verified endpoints 2026-05-22 from wozwaardeloket.nl/assets/endpoints.json.
+"""
 
 from __future__ import annotations
 
@@ -12,9 +20,10 @@ from rentbuster.models import Listing
 
 log = logging.getLogger(__name__)
 
-_KADASTER_URL = "https://api.kadaster.nl/lvwoz/wozwaardeloket-api/v1/wozwaarde"
+_PDOK_URL = "https://api.pdok.nl/bzk/locatieserver/search/v3_1/free"
+_WOZ_URL = "https://api.kadaster.nl/lvwoz/wozwaardeloket-api/v1/wozwaarde/nummeraanduiding"
 
-# Conservative WOZ estimates per m² when Kadaster lookup fails, by city (intentionally low)
+# Conservative WOZ estimates per m² when lookup fails, by city (intentionally low)
 WOZ_ESTIMATE_PER_M2: dict[str, int] = {
     "amsterdam": 3000,
     "rotterdam": 2000,
@@ -28,82 +37,92 @@ WOZ_ESTIMATE_DEFAULT = 2000
 @dataclass
 class WOZResult:
     value: int  # EUR
-    reference_date: str | None  # ISO date string
+    reference_date: str | None  # ISO date string (peildatum)
     verified: bool
     source: str  # "kadaster" or "estimated"
+
+
+def _pdok_nummeraanduiding(
+    postal_code: str,
+    house_number: str,
+    addition: str,
+    session: requests.Session,
+) -> str | None:
+    """Resolve a Dutch address to a BAG nummeraanduiding_id via PDOK locatieserver."""
+    q = f"{postal_code.replace(' ', '')} {house_number}"
+    if addition:
+        q += f" {addition}"
+    try:
+        resp = session.get(
+            _PDOK_URL,
+            params={"q": q, "fq": "type:adres", "rows": "1"},
+            headers={"Accept": "application/json"},
+            timeout=8,
+        )
+        resp.raise_for_status()
+        docs = resp.json().get("response", {}).get("docs", [])
+        if docs:
+            return str(docs[0].get("nummeraanduiding_id") or "")
+    except Exception as exc:
+        log.debug("pdok lookup failed for %s %s: %s", postal_code, house_number, exc)
+    return None
 
 
 def lookup_woz_kadaster(
     postal_code: str,
     house_number: str,
     addition: str,
-    api_key: str,
+    session: requests.Session | None = None,
 ) -> WOZResult | None:
-    """Query the Kadaster WOZ API. Returns None on any failure.
+    """Lookup WOZ value via PDOK geocoding + Kadaster LV-WOZ API. No API key needed."""
+    _session = session or requests.Session()
 
-    NOTE: Field names in the response are educated guesses — verify against
-    the actual Kadaster API documentation and test with a real key.
-    """
-    params: dict = {"postcode": postal_code.replace(" ", ""), "huisnummer": house_number}
-    if addition:
-        params["huisnummertoevoeging"] = addition
+    nid = _pdok_nummeraanduiding(postal_code, house_number, addition, _session)
+    if not nid:
+        log.debug("woz: no nummeraanduiding for %s %s", postal_code, house_number)
+        return None
 
+    # API expects 16-char zero-padded ID
+    nid_padded = nid.zfill(16)
     try:
-        resp = requests.get(
-            _KADASTER_URL,
-            params=params,
-            headers={"X-Api-Key": api_key},
+        resp = _session.get(
+            f"{_WOZ_URL}/{nid_padded}",
+            headers={
+                "Accept": "application/json",
+                "Origin": "https://www.wozwaardeloket.nl",
+                "Referer": "https://www.wozwaardeloket.nl/",
+            },
             timeout=10,
         )
-    except requests.RequestException as exc:
-        log.warning("kadaster api request failed: %s", exc)
-        return None
-
-    if not resp.ok:
-        log.warning("kadaster api returned %s for %s %s", resp.status_code, postal_code, house_number)
-        return None
-
-    try:
+        if not resp.ok:
+            log.debug("woz: kadaster returned %s for %s", resp.status_code, nid_padded)
+            return None
         data = resp.json()
-    except Exception:
-        log.warning("kadaster api returned non-json response")
+    except Exception as exc:
+        log.warning("woz: kadaster request failed: %s", exc)
         return None
 
-    # Try several known/possible response shapes
-    waarden = (
-        data.get("wozWaarden")
-        or data.get("waarden")
-        or data.get("wozwaarden")
-        or []
-    )
+    waarden = data.get("wozWaarden") or []
     if not waarden:
-        log.debug("kadaster: no woz values in response for %s %s", postal_code, house_number)
+        log.debug("woz: no wozWaarden in response for %s %s", postal_code, house_number)
         return None
 
-    # Take most recent by peildatum
-    def _date_key(w: dict) -> str:
-        return w.get("peildatum") or w.get("waardepeildatum") or ""
-
-    most_recent = max(waarden, key=_date_key)
-    value = (
-        most_recent.get("vastgesteldeWaarde")
-        or most_recent.get("wozwaarde")
-        or most_recent.get("waarde")
-    )
+    # Take the most recent peildatum
+    most_recent = max(waarden, key=lambda w: w.get("peildatum") or "")
+    value = most_recent.get("vastgesteldeWaarde")
     if not value:
         return None
 
-    reference_date = most_recent.get("peildatum") or most_recent.get("waardepeildatum")
     return WOZResult(
         value=int(value),
-        reference_date=reference_date,
+        reference_date=most_recent.get("peildatum"),
         verified=True,
         source="kadaster",
     )
 
 
 def estimate_woz(city: str, surface_area_m2: int) -> WOZResult:
-    """Return a conservative WOZ estimate when Kadaster is unavailable."""
+    """Conservative WOZ estimate when Kadaster lookup is unavailable."""
     city_key = (city or "").lower().strip()
     per_m2 = WOZ_ESTIMATE_PER_M2.get(city_key, WOZ_ESTIMATE_DEFAULT)
     m2 = surface_area_m2 or 50
@@ -115,19 +134,28 @@ def estimate_woz(city: str, surface_area_m2: int) -> WOZResult:
     )
 
 
-def lookup_woz(listing: Listing, api_key: str | None) -> WOZResult:
+def lookup_woz(listing: Listing, api_key: str | None = None) -> WOZResult:
     """Resolve WOZ value for a listing; mutates listing WOZ fields.
 
-    Tries Kadaster API first (if api_key and address available), falls back to estimate.
+    If listing already has a woz_value (e.g. from rent-buster.nl), skips lookup.
+    Falls back to per-m² estimate if Kadaster lookup fails.
+    The api_key parameter is ignored (API is free); kept for config compatibility.
     """
+    if listing.woz_value and listing.woz_verified:
+        return WOZResult(
+            value=listing.woz_value,
+            reference_date=listing.woz_reference_date,
+            verified=True,
+            source="existing",
+        )
+
     result: WOZResult | None = None
 
-    if api_key and listing.postal_code and listing.house_number:
+    if listing.postal_code and listing.house_number:
         result = lookup_woz_kadaster(
             postal_code=listing.postal_code,
             house_number=listing.house_number,
             addition=listing.house_number_addition,
-            api_key=api_key,
         )
 
     if result is None:
