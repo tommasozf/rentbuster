@@ -1,32 +1,31 @@
-# Kamernet Radar — full-stack local setup
+# RentBuster — full-stack local setup
 #
-# Basic:   docker compose up               # starts db + scraper
+# Basic:   docker compose up               # starts db + rentbuster
 # With dashboard: docker compose --profile dashboard up
-# First-time schema init: docker compose run --rm scraper python -m radar init-db
+# First-time schema init: docker compose run --rm rentbuster python -m rentbuster init-db
 #
 # The dashboard is bound to 127.0.0.1 by default so it is NOT reachable from the public
-# internet even if you expose the host. If you want remote access, wrap it in a reverse
-# proxy with auth (see docs/DEPLOYMENT.md).
+# internet even if you expose the host. Wrap in a reverse proxy with auth for remote access.
 
 services:
   db:
     image: postgres:15-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-radar}
-      POSTGRES_USER: ${POSTGRES_USER:-radar}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-radar}
+      POSTGRES_DB: ${POSTGRES_DB:-rentbuster}
+      POSTGRES_USER: ${POSTGRES_USER:-rentbuster}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rentbuster}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
-      - radar-db:/var/lib/postgresql/data
+      - rentbuster-db:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-radar} -d ${POSTGRES_DB:-radar}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rentbuster} -d ${POSTGRES_DB:-rentbuster}"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  scraper:
+  rentbuster:
     build: .
     restart: unless-stopped
     depends_on:
@@ -35,8 +34,9 @@ services:
     env_file:
       - .env
     environment:
-      # Override host-side DATABASE_URL so the container reaches the db service
-      DATABASE_URL: postgres://${POSTGRES_USER:-radar}:${POSTGRES_PASSWORD:-radar}@db:5432/${POSTGRES_DB:-radar}
+      DATABASE_URL: postgres://${POSTGRES_USER:-rentbuster}:${POSTGRES_PASSWORD:-rentbuster}@db:5432/${POSTGRES_DB:-rentbuster}
+    # Playwright needs a display shim for headless Chromium in some environments
+    # shm_size: 2g  # uncomment if Chromium crashes with OOM errors
 
   dashboard:
     profiles: [dashboard]
@@ -47,10 +47,10 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-radar}:${POSTGRES_PASSWORD:-radar}@db:5432/${POSTGRES_DB:-radar}
+      DATABASE_URL: postgres://${POSTGRES_USER:-rentbuster}:${POSTGRES_PASSWORD:-rentbuster}@db:5432/${POSTGRES_DB:-rentbuster}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
     ports:
       - "127.0.0.1:3000:3000"
 
 volumes:
-  radar-db:
+  rentbuster-db:
