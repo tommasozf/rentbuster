@@ -1,14 +1,18 @@
 """rent-buster.nl HTTP scraper.
 
-rent-buster.nl is a Next.js app — we extract listing data from the __NEXT_DATA__
-JSON blob embedded in the HTML. Field paths are based on observed page structure;
-they may need adjustment if the site is updated.
+rent-buster.nl uses Next.js App Router with RSC (React Server Components) streaming.
+Listing data is embedded inline in the RSC payload as JSON props on each card component.
+The RSC endpoint is fetched with the 'RSC: 1' header; listing cards match the pattern
+{"imageUrl":...,"type":"..."} within each RSC line.
+
+Field paths verified against rent-buster.nl/feed on 2026-05-22.
+City filter requires title-case names (e.g. 'Amsterdam', not 'amsterdam').
+Pagination via ?page=N (1-indexed).
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 import time
@@ -16,18 +20,140 @@ from typing import Any
 
 import requests
 
-from rentbuster.models import Listing, Source
-from rentbuster.sources.pararius import _parse_price
+from rentbuster.models import EnergyLabel, Listing, Source
 
 log = logging.getLogger(__name__)
 
-_NEXT_DATA_RE = re.compile(
-    r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
-    re.DOTALL,
-)
+BASE_URL = "https://rent-buster.nl"
+_LISTINGS_PER_PAGE = 10
 
-# Try both with and without www prefix
-_BASE_URLS = ["https://www.rent-buster.nl", "https://rent-buster.nl"]
+# RSC listing card props: {"imageUrl":...,"type":"Appartement"}
+_LISTING_RE = re.compile(r'\{"imageUrl":.*?"type":"[^"]+"\}')
+# Dutch postal code embedded in address string: "1068LD" or "1068 LD"
+_POSTAL_RE = re.compile(r'\b(\d{4})\s*([A-Z]{2})\b')
+# House number with optional letter/hyphen suffix: "21-F", "34C", "86"
+_ADDR_RE = re.compile(r'^(.+?)\s+(\d+[-–]?\d*[A-Za-z]?)\s*([A-Za-z0-9-]*)$')
+
+
+def _parse_address(address: str) -> tuple[str, str, str, str]:
+    """Parse 'Osdorper Ban 21-F, 1068LD Amsterdam' → (street, number, addition, postal_code).
+
+    The address string from rent-buster.nl is 'Street N[-A], POSTALCity'.
+    """
+    postal_code = ""
+    street_part = address
+
+    comma_idx = address.find(",")
+    if comma_idx != -1:
+        street_part = address[:comma_idx].strip()
+        after_comma = address[comma_idx + 1:].upper()
+        pc_m = _POSTAL_RE.search(after_comma)
+        if pc_m:
+            postal_code = f"{pc_m.group(1)} {pc_m.group(2)}"
+
+    m = _ADDR_RE.match(street_part)
+    if m:
+        street = m.group(1).strip()
+        number_raw = m.group(2).strip()
+        addition_raw = m.group(3).strip()
+        # "21-F" → number="21", addition="F"
+        # "21-F" → number="21", addition="F" (letter-only suffix = addition)
+        hyp_letter = re.match(r'^(\d+)[-–]([A-Za-z])$', number_raw)
+        if hyp_letter and not addition_raw:
+            return street, hyp_letter.group(1), hyp_letter.group(2), postal_code
+        # "34C-22" → addition starts with "-", keep as part of number
+        if addition_raw.startswith(("-", "–")):
+            return street, number_raw + addition_raw, "", postal_code
+        return street, number_raw, addition_raw, postal_code
+
+    return street_part, "", "", postal_code
+
+
+def _item_to_listing(item: dict[str, Any]) -> Listing | None:
+    """Convert a rent-buster.nl RSC listing props dict to a Listing."""
+    prop_id = str(item.get("propertyId") or "")
+    full_url = str(item.get("fullUrl") or "")
+    if not prop_id:
+        return None
+
+    address_raw = str(item.get("address") or "")
+    street, house_number, addition, postal_code = _parse_address(address_raw)
+
+    city = str(item.get("city") or "").lower()
+
+    try:
+        asking_rent = int(item.get("price") or 0)
+    except (TypeError, ValueError):
+        asking_rent = 0
+
+    try:
+        surface = int(item.get("size") or 0)
+    except (TypeError, ValueError):
+        surface = 0
+
+    try:
+        num_rooms = int(item.get("rooms") or 0)
+    except (TypeError, ValueError):
+        num_rooms = 0
+
+    energy_label = EnergyLabel.from_string(str(item.get("energyLabel") or ""))
+
+    try:
+        woz_value = int(item.get("woz") or 0) or None
+    except (TypeError, ValueError):
+        woz_value = None
+
+    try:
+        build_year = int(item.get("buildYear") or 0) or None
+    except (TypeError, ValueError):
+        build_year = None
+
+    try:
+        wws_points = float(item.get("points") or 0) or None
+    except (TypeError, ValueError):
+        wws_points = None
+
+    try:
+        rb_max = float(item.get("reducedPrice") or 0) or None
+    except (TypeError, ValueError):
+        rb_max = None
+
+    rb_savings = None
+    if rb_max is not None and asking_rent > 0:
+        rb_savings = float(asking_rent) - rb_max
+
+    furnished = item.get("furnished", False)
+    interior = "furnished" if furnished else ""
+
+    prop_type = str(item.get("type") or "apartment").lower()
+
+    images = []
+    img = str(item.get("imageUrl") or "")
+    if img:
+        images = [img]
+
+    return Listing(
+        source=Source.RENTBUSTER_NL,
+        source_id=prop_id,
+        url=full_url,
+        street=street,
+        house_number=house_number,
+        house_number_addition=addition,
+        postal_code=postal_code,
+        city=city,
+        asking_rent=asking_rent,
+        surface_area_m2=surface,
+        num_rooms=num_rooms,
+        property_type=prop_type,
+        interior=interior,
+        energy_label=energy_label,
+        woz_value=woz_value,
+        construction_year=build_year,
+        wws_points=wws_points,
+        rb_estimated_max_rent=rb_max,
+        rb_savings=rb_savings,
+        images=images,
+    )
 
 
 class RentbusterNLSource:
@@ -36,46 +162,31 @@ class RentbusterNLSource:
     def __init__(
         self,
         city: str = "amsterdam",
-        max_pages: int = 10,
-        user_agent: str = "Mozilla/5.0 (compatible; RentBuster/2.0)",
+        max_pages: int = 25,
+        user_agent: str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     ) -> None:
-        self.city = city.lower()
+        self.city = city
+        # rent-buster.nl city filter requires title-case (e.g. "Amsterdam")
+        self._city_param = city.title()
         self.max_pages = max_pages
         self._session = self._make_session(user_agent)
-        self._base_url: str | None = None
 
     def _make_session(self, user_agent: str) -> requests.Session:
         session = requests.Session()
         session.headers.update(
             {
                 "User-Agent": user_agent,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept": "text/x-component, */*",
                 "Accept-Language": "nl-NL,nl;q=0.9,en;q=0.7",
+                "RSC": "1",
+                "Next-Router-State-Tree": "%5B%22%22%2C%7B%22children%22%3A%5B%22feed%22%2C%7B%22children%22%3A%5B%22__PAGE__%22%2C%7B%7D%5D%7D%5D%7D%2Cnull%2Cnull%2Ctrue%5D",
                 "Connection": "keep-alive",
             }
         )
         return session
 
-    def _resolve_base_url(self) -> str | None:
-        """Determine which domain (www. or bare) responds."""
-        for url in _BASE_URLS:
-            try:
-                resp = self._session.get(url, timeout=10, allow_redirects=True)
-                if resp.ok:
-                    log.debug("rent-buster.nl: using base URL %s", url)
-                    return url
-            except requests.RequestException:
-                continue
-        return None
-
-    def _fetch_page_html(self, page: int) -> str | None:
-        if self._base_url is None:
-            self._base_url = self._resolve_base_url()
-            if self._base_url is None:
-                log.error("rent-buster.nl: domain not reachable")
-                return None
-
-        url = f"{self._base_url}/feed?page={page}&city={self.city}"
+    def _fetch_page_rsc(self, page: int) -> str | None:
+        url = f"{BASE_URL}/feed?city={self._city_param}&page={page}"
         try:
             resp = self._session.get(url, timeout=30)
             resp.raise_for_status()
@@ -84,140 +195,55 @@ class RentbusterNLSource:
             log.warning("rent-buster.nl: page %d fetch failed: %s", page, exc)
             return None
 
-    def _extract_next_data(self, html: str) -> dict | None:
-        m = _NEXT_DATA_RE.search(html)
-        if not m:
-            return None
-        try:
-            return json.loads(m.group(1))
-        except json.JSONDecodeError:
-            return None
-
-    def _parse_next_data(self, data: dict) -> list[dict]:
-        """Extract listing items from __NEXT_DATA__ JSON.
-
-        Tries several known paths since the structure may vary by page type.
-        """
-        page_props = data.get("props", {}).get("pageProps", {})
-        # Try common Next.js data paths
-        for path in (
-            ["listings"],
-            ["data", "listings"],
-            ["initialData", "listings"],
-            ["feed"],
-            ["items"],
-        ):
-            obj = page_props
-            for key in path:
-                if isinstance(obj, dict):
-                    obj = obj.get(key)
-                else:
-                    obj = None
-                    break
-            if isinstance(obj, list) and obj:
-                return obj
-        return []
-
-    def _item_to_listing(self, item: dict) -> Listing | None:
-        """Convert a raw rent-buster.nl item dict to a Listing."""
-        # Extract identifiers
-        source_id = str(item.get("id") or item.get("listing_id") or "")
-        url = item.get("url") or item.get("link") or item.get("pararius_url") or ""
-        if not source_id and not url:
-            return None
-        if not source_id:
-            source_id = url.rstrip("/").split("/")[-1]
-
-        # Address fields
-        street = item.get("street") or item.get("straat") or ""
-        house_number = str(item.get("house_number") or item.get("huisnummer") or "")
-        addition = str(item.get("house_number_addition") or item.get("toevoeging") or "")
-        postal_code = item.get("postal_code") or item.get("postcode") or ""
-        city = item.get("city") or item.get("stad") or self.city
-
-        # Price
-        asking_rent_raw = item.get("rent") or item.get("price") or item.get("huurprijs") or 0
-        asking_rent = int(asking_rent_raw) if isinstance(asking_rent_raw, (int, float)) else _parse_price(str(asking_rent_raw))
-
-        # Size
-        surface = item.get("surface") or item.get("oppervlak") or item.get("surface_area") or 0
-        try:
-            surface = int(surface)
-        except (TypeError, ValueError):
-            surface = 0
-
-        # Rent-buster analysis fields
-        rb_max_rent = None
-        rb_savings = None
-        rb_confidence = None
-
-        for key in ("max_rent", "maximum_rent", "wws_max_rent", "legal_max_rent"):
-            if item.get(key) is not None:
-                try:
-                    rb_max_rent = float(item[key])
-                except (TypeError, ValueError):
-                    pass
-                break
-
-        asking = float(asking_rent)
-        if rb_max_rent is not None and asking > 0:
-            rb_savings = asking - rb_max_rent
-
-        for key in ("confidence", "betrouwbaarheid", "certainty"):
-            if item.get(key) is not None:
-                rb_confidence = str(item[key])
-                break
-
-        return Listing(
-            source=Source.RENTBUSTER_NL,
-            source_id=source_id,
-            url=url,
-            street=street,
-            house_number=house_number,
-            house_number_addition=addition,
-            postal_code=postal_code,
-            city=city,
-            asking_rent=asking_rent,
-            surface_area_m2=surface,
-            rb_estimated_max_rent=rb_max_rent,
-            rb_savings=rb_savings,
-            rb_confidence=rb_confidence,
-        )
-
-    async def fetch_listings(self) -> list[Listing]:
-        """Fetch all pages from rent-buster.nl; runs in an executor to keep sync requests."""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._fetch_listings_sync)
+    def _parse_rsc(self, rsc_text: str) -> list[Listing]:
+        """Extract listing objects from RSC streaming payload."""
+        listings = []
+        for raw in _LISTING_RE.findall(rsc_text):
+            try:
+                import json
+                item = json.loads(raw)
+                listing = _item_to_listing(item)
+                if listing:
+                    listings.append(listing)
+            except Exception as exc:
+                log.debug("rent-buster.nl: parse error: %s", exc)
+        return listings
 
     def _fetch_listings_sync(self) -> list[Listing]:
         listings: list[Listing] = []
+        seen: set[str] = set()
 
         for page in range(1, self.max_pages + 1):
-            html = self._fetch_page_html(page)
-            if not html:
+            rsc = self._fetch_page_rsc(page)
+            if not rsc:
                 break
 
-            data = self._extract_next_data(html)
-            if not data:
-                log.warning("rent-buster.nl: no __NEXT_DATA__ on page %d", page)
-                break
-
-            items = self._parse_next_data(data)
-            if not items:
+            page_listings = self._parse_rsc(rsc)
+            if not page_listings:
                 log.info("rent-buster.nl: no listings on page %d, stopping", page)
                 break
 
-            new = [self._item_to_listing(item) for item in items]
-            valid = [l for l in new if l is not None]
-            listings.extend(valid)
-            log.info("rent-buster.nl: page %d → %d listings", page, len(valid))
-
-            if len(valid) < len(items) // 2:
-                # Too many parse failures — probably at end of data
+            new = [l for l in page_listings if l.source_id not in seen]
+            if not new:
+                log.info("rent-buster.nl: no new listings on page %d, stopping", page)
                 break
+
+            for l in new:
+                seen.add(l.source_id)
+            listings.extend(new)
+            log.info("rent-buster.nl: page %d → %d listings (total: %d)", page, len(new), len(listings))
+
+            if len(page_listings) < _LISTINGS_PER_PAGE:
+                # Last page
+                break
+
             time.sleep(1)
 
         return listings
+
+    async def fetch_listings(self) -> list[Listing]:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._fetch_listings_sync)
 
     async def close(self) -> None:
         self._session.close()
