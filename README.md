@@ -8,19 +8,21 @@ No AI, no paid APIs, no subscriptions. Everything runs free.
 
 ## How it works
 
-1. **Scrapes** Pararius (Playwright + stealth) and rent-buster.nl (plain HTTP) every 2–5 minutes
-2. **Looks up WOZ value** via the free public Kadaster API (PDOK geocoding → LV-WOZ)
-3. **Calculates WWS points** using the 2025 Huurcommissie rules — surface area, WOZ, energy label, rooms, outdoor space, etc.
-4. **Flags bustable listings** where asking rent > legal maximum (threshold: 187 points)
-5. **Notifies you** via Telegram, Discord, or any Apprise channel
+1. **Scrapes** Pararius (Playwright + stealth, ~450 listings) and rent-buster.nl (plain HTTP, ~220 listings) every 2–5 minutes
+2. **Filters** by property type, room count, and rent ceiling to focus on apartments that could realistically be regulated
+3. **Looks up WOZ value** via the free public Kadaster API (PDOK geocoding + LV-WOZ)
+4. **Calculates WWS points** using the 2025 Huurcommissie rules — surface area, WOZ, energy label, rooms, outdoor space, etc.
+5. **Ranks listings** by bust score (savings x confidence x WOZ reliability)
+6. **Notifies you** via Telegram, Discord, or any Apprise channel
+7. **Stores everything** in Postgres — query your top listings any time via Telegram `/top` or CLI
 
-rent-buster.nl listings come with pre-computed WWS points and max rents already attached — those go straight through without needing a WOZ lookup.
+rent-buster.nl listings come with pre-computed WWS points, WOZ values, and max rents already attached — those skip the lookup step entirely.
 
 ---
 
-## Quick start (local)
+## Quick start
 
-Requires Python 3.10+ and the `rentbuster` conda environment (or any venv with deps installed).
+Requires Python 3.10+ and either conda, pip, or uv for dependencies.
 
 ```bash
 git clone <this-repo>
@@ -36,7 +38,11 @@ playwright install chromium
 
 # Copy and fill in config
 cp .env.example .env
-# Edit .env: set at least one of DISCORD_WEBHOOK_URL or TELEGRAM_BOT_TOKEN
+# Edit .env: set at least DISCORD_WEBHOOK_URL or TELEGRAM_BOT_TOKEN
+
+# Start Postgres (required for persistence and /top queries)
+docker compose up -d db        # or: podman-compose up -d db
+python -m rentbuster init-db
 
 # One-shot dry run (no notifications, no DB writes — just shows what it finds)
 python -m rentbuster -v run --once --dry-run
@@ -47,18 +53,39 @@ python -m rentbuster run
 
 ---
 
+## Querying top listings
+
+Once the scraper has run at least once with a database, you can query the best bustable listings ranked by **bust score** (savings x confidence x WOZ reliability).
+
+### CLI
+
+```bash
+python -m rentbuster top              # top 5
+python -m rentbuster top --limit 15   # top 15
+```
+
+### Telegram
+
+Send `/top` or `/top 10` to your bot. Requires an active subscription (see Telegram setup below).
+
+### Discord
+
+Discord uses webhooks (one-way, send-only), so it can't receive commands. Use the CLI or Telegram for interactive queries. Discord will still receive real-time alerts for every new bustable listing.
+
+---
+
 ## Notifications setup
 
-### Discord (easiest)
+### Discord (easiest — alerts only)
 
 1. Open the Discord server where you want alerts
 2. Edit any channel → **Integrations** → **Webhooks** → **New Webhook**
 3. Copy the webhook URL
 4. In `.env`: `DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...`
 
-You'll get a rich embed with address, asking rent, legal max, savings, energy label, and a link to the listing.
+You'll get a rich embed with address, asking rent, legal max, savings, energy label, source, and a link to the listing.
 
-### Telegram (recommended for mobile)
+### Telegram (recommended — alerts + interactive queries)
 
 **Step 1 — create a bot:**
 
@@ -82,7 +109,10 @@ Once the scraper is running, open your bot in Telegram and send:
 /start somesecretword
 ```
 
-That's it. Every bustable listing will land in your Telegram DMs. The password gates it so nobody else can subscribe.
+**Available commands:**
+- `/start <password>` — subscribe to alerts
+- `/stop` — unsubscribe
+- `/top` or `/top 10` — show the top bustable listings from the database
 
 ### Apprise (ntfy, Pushover, Slack, email, etc.)
 
@@ -103,20 +133,18 @@ APPRISE_URLS=ntfy://mytopic,pover://UserKey@AppKey
 
 ## Configuration
 
-Copy `.env.example` to `.env` and set what you need. Nothing is required — without a notification URL it just logs to stdout, and without `DATABASE_URL` it runs without persistence (re-notifies everything on restart).
+Copy `.env.example` to `.env` and set what you need. Without a notification URL it just logs to stdout.
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `PROFILE` | `amsterdam` | Search profile (see `profiles/`) |
-| `DATABASE_URL` | — | Postgres URL. Required for persistence and Telegram subscribers |
+| `DATABASE_URL` | — | Postgres URL. Required for persistence, `/top`, and Telegram |
 | `PARARIUS_ENABLED` | `true` | Scrape Pararius (Playwright-based) |
-| `PARARIUS_MAX_PAGES` | `5` | How many search result pages to scrape |
 | `PLAYWRIGHT_HEADLESS` | `true` | Set `false` to watch the browser |
-| `FETCH_DETAILS` | `true` | Visit each listing's detail page for energy label, postal code etc. |
+| `FETCH_DETAILS` | `true` | Visit each listing's detail page for energy label etc. |
 | `RENTBUSTER_NL_ENABLED` | `true` | Scrape rent-buster.nl (HTTP-based, faster) |
-| `RENTBUSTER_NL_MAX_PAGES` | `10` | Pages to scrape from rent-buster.nl |
 | `WWS_BUSTABLE_ONLY` | `true` | Only notify on bustable listings |
-| `WWS_MIN_SAVINGS` | `50` | Minimum €/month savings to trigger a notification |
+| `WWS_MIN_SAVINGS` | `50` | Minimum EUR/month savings to trigger a notification |
 | `DISCORD_WEBHOOK_URL` | — | Discord webhook URL |
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot token (from @BotFather) |
 | `TELEGRAM_PASSWORD` | — | Password users send with `/start` to subscribe |
@@ -128,17 +156,38 @@ Copy `.env.example` to `.env` and set what you need. Nothing is required — wit
 
 ## Profiles
 
-A profile sets the city, max rent filter, and WWS defaults. The built-in `amsterdam` profile is at `profiles/amsterdam.yaml`. Copy and edit it for other cities:
+A profile sets the city, rent ceiling, room limits, and WWS defaults. The built-in `amsterdam` profile is at `profiles/amsterdam.yaml`:
+
+```yaml
+name: amsterdam
+description: Find bustable apartments in Amsterdam
+
+search:
+  city: amsterdam
+  max_rent: 3500           # EUR/month ceiling for search
+  max_rooms: 4             # skip 5+ room apartments (too large to be regulated)
+  property_types: [apartment, studio]
+  pararius_max_pages: 15
+  rentbuster_nl_max_pages: 23
+
+wws:
+  bustable_only: true
+  min_savings: 50
+```
+
+Copy and edit it for other cities:
 
 ```yaml
 name: rotterdam
-description: Rotterdam bustable listings under €2000/mo
+description: Rotterdam bustable listings
 
 search:
   city: rotterdam
-  max_rent: 2000
-  pararius_max_pages: 5
-  rentbuster_nl_max_pages: 10
+  max_rent: 2500
+  max_rooms: 4
+  property_types: [apartment, studio]
+  pararius_max_pages: 10
+  rentbuster_nl_max_pages: 15
 
 wws:
   bustable_only: true
@@ -146,6 +195,29 @@ wws:
 ```
 
 Pass it with `--profile rotterdam` or set `PROFILE=rotterdam` in `.env`.
+
+---
+
+## Database
+
+Postgres is strongly recommended. Without it the scraper has no memory — it re-notifies about the same listings after a restart, and you can't use `/top`.
+
+```bash
+# Start Postgres via Docker/Podman (included in docker-compose.yml)
+docker compose up -d db
+
+# In .env:
+DATABASE_URL=postgres://rentbuster:rentbuster@localhost:5432/rentbuster
+
+# Create tables (run once, safe to re-run)
+python -m rentbuster init-db
+```
+
+The database stores:
+- All scraped listings with WWS scores and bust rankings
+- WOZ value cache (avoids re-querying Kadaster for known addresses)
+- Telegram subscriber list
+- Scrape run history
 
 ---
 
@@ -165,7 +237,7 @@ python -m rentbuster run
 
 ### Option B: systemd on a VPS (reliable)
 
-A Hetzner CAX11 (arm64, €3.79/mo) or CX22 (€4.35/mo) is plenty — the scraper needs ~500 MB RAM for Playwright.
+A Hetzner CAX11 (arm64, ~4 EUR/mo) or CX22 (~4.50 EUR/mo) is plenty — the scraper needs ~500 MB RAM for Playwright.
 
 ```bash
 # On the VPS, after cloning and installing deps:
@@ -208,24 +280,19 @@ The `docker-compose.yml` includes Postgres. For Pararius, Playwright needs its C
 
 ---
 
-## Database (optional)
+## How bust score works
 
-Without `DATABASE_URL` the scraper works fine but has no memory — it will re-notify you about the same listings after a restart. With Postgres it tracks what it's seen, caches WOZ lookups, and is required for Telegram subscriber persistence.
+Each bustable listing gets a **bust score** that ranks how attractive it is to dispute:
 
-```bash
-# Start a local Postgres (Docker)
-docker run -d --name pg \
-  -e POSTGRES_PASSWORD=rentbuster \
-  -e POSTGRES_USER=rentbuster \
-  -e POSTGRES_DB=rentbuster \
-  -p 5432:5432 postgres:16
-
-# In .env:
-DATABASE_URL=postgres://rentbuster:rentbuster@localhost:5432/rentbuster
-
-# Bootstrap schema (run once)
-python -m rentbuster init-db
 ```
+bust_score = monthly_savings x confidence_multiplier x woz_multiplier
+```
+
+- **Monthly savings**: asking rent minus legal maximum (higher = bigger win)
+- **Confidence multiplier**: HIGH = 1.0, MEDIUM = 0.8, LOW = 0.5, VERY_LOW = 0.3
+- **WOZ multiplier**: 1.0 if WOZ is verified (Kadaster/rent-buster.nl), 0.7 if estimated
+
+A listing asking EUR 2000/mo with a legal max of EUR 800/mo, HIGH confidence, and verified WOZ scores `1200 x 1.0 x 1.0 = 1200`. The higher the score, the more worth pursuing.
 
 ---
 
