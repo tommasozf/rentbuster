@@ -264,6 +264,26 @@ class Database:
             log.warning("get_top_listings failed: %s", exc)
             return []
 
+    # ── Bulk load ──
+
+    def load_all_listings(self) -> list[dict]:
+        try:
+            with self._cursor() as cur:
+                cur.execute(
+                    "SELECT source, source_id, url, street, house_number, house_number_addition, "
+                    "postal_code, city, neighborhood, asking_rent, surface_area_m2, num_rooms, "
+                    "energy_label, construction_year, property_type, interior, description, "
+                    "images, available_from, agency_name, "
+                    "woz_value, woz_reference_date, woz_verified, "
+                    "rb_estimated_max_rent, rb_savings, rb_confidence "
+                    "FROM listings ORDER BY first_seen_at DESC"
+                )
+                cols = [desc[0] for desc in cur.description]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+        except Exception as exc:
+            log.warning("load_all_listings failed: %s", exc)
+            return []
+
     # ── Schema init ──
 
     def migrate(self) -> None:

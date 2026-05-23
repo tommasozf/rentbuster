@@ -107,6 +107,91 @@ def _cmd_top(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_recalculate(args: argparse.Namespace) -> int:
+    import json
+    from rentbuster.llm import LLMExtraction, extract_batch
+    from rentbuster.models import EnergyLabel, Listing, Source
+    from rentbuster.woz import lookup_woz
+    from rentbuster.wws import calculate_wws
+
+    settings = load_settings()
+    if not settings.database_url:
+        print("error: DATABASE_URL is not set", file=sys.stderr)
+        return 1
+
+    db = Database(settings.database_url)
+    rows = db.load_all_listings()
+    if not rows:
+        print("no listings in database")
+        db.close()
+        return 0
+
+    print(f"loaded {len(rows)} listings from database")
+
+    listings: list[Listing] = []
+    for r in rows:
+        images = r["images"] or "[]"
+        if isinstance(images, str):
+            images = json.loads(images)
+        listings.append(Listing(
+            source=Source(r["source"]),
+            source_id=r["source_id"],
+            url=r["url"],
+            street=r.get("street") or "",
+            house_number=r.get("house_number") or "",
+            house_number_addition=r.get("house_number_addition") or "",
+            postal_code=r.get("postal_code") or "",
+            city=r.get("city") or "",
+            neighborhood=r.get("neighborhood") or "",
+            asking_rent=r.get("asking_rent") or 0,
+            surface_area_m2=r.get("surface_area_m2") or 0,
+            num_rooms=r.get("num_rooms") or 0,
+            energy_label=EnergyLabel.from_string(r.get("energy_label")),
+            construction_year=r.get("construction_year"),
+            property_type=r.get("property_type") or "",
+            interior=r.get("interior") or "",
+            description=r.get("description") or "",
+            images=images,
+            available_from=r.get("available_from") or "",
+            agency_name=r.get("agency_name") or "",
+            woz_value=r.get("woz_value"),
+            woz_reference_date=r.get("woz_reference_date"),
+            woz_verified=bool(r.get("woz_verified")),
+            rb_estimated_max_rent=r.get("rb_estimated_max_rent"),
+            rb_savings=r.get("rb_savings"),
+            rb_confidence=r.get("rb_confidence"),
+        ))
+
+    extractions: dict[str, LLMExtraction] = {}
+    if settings.llm_enabled and settings.gemini_api_key:
+        print("running LLM extraction...")
+        extractions = extract_batch(listings, settings.gemini_api_key, settings.llm_model)
+        print(f"extracted features for {len(extractions)}/{len(listings)} listings")
+    else:
+        print("LLM disabled — recalculating with defaults only")
+
+    print("recalculating WWS scores...")
+    bustable = 0
+    for listing in listings:
+        if not listing.woz_value:
+            lookup_woz(listing)
+        key = f"{listing.source.value}:{listing.source_id}"
+        calculate_wws(listing, llm_extraction=extractions.get(key))
+        if listing.wws_is_bustable:
+            bustable += 1
+
+    if not args.dry_run:
+        print("updating database...")
+        for listing in listings:
+            db.upsert_listing(listing)
+        print(f"updated {len(listings)} listings ({bustable} bustable)")
+    else:
+        print(f"dry-run: would update {len(listings)} listings ({bustable} bustable)")
+
+    db.close()
+    return 0
+
+
 def _cmd_list_profiles(args: argparse.Namespace) -> int:
     profiles = sorted(PROFILES_DIR.glob("*.yaml"))
     if not profiles:
@@ -191,6 +276,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="number of listings to show (default: 10)",
     )
     top_parser.set_defaults(func=_cmd_top)
+
+    recalc_parser = subparsers.add_parser(
+        "recalculate", help="re-score all listings in the database with LLM extraction + WWS"
+    )
+    recalc_parser.add_argument("--dry-run", action="store_true", help="recalculate but don't write to DB")
+    recalc_parser.set_defaults(func=_cmd_recalculate)
 
     subparsers.add_parser("list-profiles", help="list available profiles").set_defaults(
         func=_cmd_list_profiles
