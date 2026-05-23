@@ -11,6 +11,7 @@ from datetime import datetime
 from rentbuster.config import Settings
 from rentbuster.db import Database
 from rentbuster.dedup import deduplicate
+from rentbuster.llm import LLMExtraction, extract_batch
 from rentbuster.models import Listing
 from rentbuster.notify import NotifierBundle
 from rentbuster.profile import Profile
@@ -107,9 +108,15 @@ class RentBuster:
             if need_woz and (i + 1) % 50 == 0:
                 log.info("  WOZ progress: %d/%d", i + 1, len(new_listings))
 
-        # 6. Calculate WWS points
+        # 6. LLM feature extraction (optional)
+        extractions: dict[str, LLMExtraction] = {}
+        if self.settings.llm_enabled and self.settings.gemini_api_key:
+            extractions = extract_batch(new_listings, self.settings.gemini_api_key, self.settings.llm_model)
+
+        # 7. Calculate WWS points
         for listing in new_listings:
-            calculate_wws(listing)
+            key = f"{listing.source.value}:{listing.source_id}"
+            calculate_wws(listing, llm_extraction=extractions.get(key))
             log.debug(
                 "  %s %s — %s pts → €%s/mo (bustable=%s)",
                 listing.street,

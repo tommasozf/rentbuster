@@ -15,6 +15,11 @@ from dataclasses import dataclass, field
 from rentbuster.models import ConfidenceLevel, EnergyLabel, Listing
 from rentbuster.woz import WOZ_ESTIMATE_DEFAULT, WOZ_ESTIMATE_PER_M2
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from rentbuster.llm import LLMExtraction
+
 # ── Constants ──────────────────────────────────────────────────────────────────
 
 LIBERALIZATION_THRESHOLD = 187  # points; above this the apartment is free-market
@@ -156,12 +161,11 @@ class WWSBreakdown:
 
 # ── Calculator ─────────────────────────────────────────────────────────────────
 
-def calculate_wws(listing: Listing) -> WWSBreakdown:
+def calculate_wws(listing: Listing, llm_extraction: LLMExtraction | None = None) -> WWSBreakdown:
     """Calculate WWS points for a listing; mutates listing in place with results.
 
-    Conservative defaults are used for missing data so we bias toward flagging
-    listings as potentially bustable (false positives) rather than missing them.
-    Tenants should verify with the official Huurcommissie calculator before acting.
+    If llm_extraction is provided, its values replace the conservative defaults
+    for outdoor space, kitchen, bathroom, and heating.
     """
     bd = WWSBreakdown()
     flags: list[str] = []
@@ -177,7 +181,7 @@ def calculate_wws(listing: Listing) -> WWSBreakdown:
     if listing.energy_label:
         bd.energy_label = ENERGY_POINTS_APARTMENT.get(listing.energy_label.value, 11.0)
     else:
-        bd.energy_label = ENERGY_POINTS_APARTMENT["D"]  # conservative default
+        bd.energy_label = ENERGY_POINTS_APARTMENT["D"]
         flags.append("energy_label_unknown_assumed_D")
 
     # 3. WOZ value — two-part formula with 33% cap
@@ -187,7 +191,7 @@ def calculate_wws(listing: Listing) -> WWSBreakdown:
         if not listing.woz_verified:
             flags.append("woz_estimated")
     else:
-        m2 = listing.surface_area_m2 or 50  # fallback for estimate if no area
+        m2 = listing.surface_area_m2 or 50
         per_m2 = WOZ_ESTIMATE_PER_M2.get(city_key, WOZ_ESTIMATE_DEFAULT)
         woz = m2 * per_m2
         flags.append("woz_estimated_conservative")
@@ -198,26 +202,27 @@ def calculate_wws(listing: Listing) -> WWSBreakdown:
     woz_uncapped = part_i + part_ii
     bd.woz_uncapped = round(woz_uncapped, 2)
 
-    # 33% cap: WOZ ≤ 0.33 * total → WOZ ≤ (0.33/0.67) * subtotal_without_woz
-    subtotal_without_woz = bd.surface_area + bd.energy_label + DEFAULT_OUTDOOR_POINTS + DEFAULT_KITCHEN_POINTS + DEFAULT_BATHROOM_POINTS + DEFAULT_HEATING_POINTS
+    # 4-7. Outdoor, kitchen, bathroom, heating — use LLM values or defaults
+    if llm_extraction:
+        bd.outdoor_space = llm_extraction.outdoor_points
+        bd.kitchen = llm_extraction.kitchen_points
+        bd.bathroom = llm_extraction.bathroom_points
+        bd.heating = llm_extraction.heating_points
+        flags.append("llm_extracted")
+    else:
+        bd.outdoor_space = DEFAULT_OUTDOOR_POINTS
+        flags.append("outdoor_space_assumed_none")
+        bd.kitchen = DEFAULT_KITCHEN_POINTS
+        flags.append("kitchen_assumed_minimal")
+        bd.bathroom = DEFAULT_BATHROOM_POINTS
+        flags.append("bathroom_assumed_minimal")
+        bd.heating = DEFAULT_HEATING_POINTS
+        flags.append("heating_assumed_basic")
+
+    # 33% cap: WOZ points cannot exceed 33% of total
+    subtotal_without_woz = bd.surface_area + bd.energy_label + bd.outdoor_space + bd.kitchen + bd.bathroom + bd.heating
     max_woz = (WOZ_MAX_PERCENTAGE / (1 - WOZ_MAX_PERCENTAGE)) * subtotal_without_woz
     bd.woz_capped = round(min(woz_uncapped, max_woz), 2)
-
-    # 4. Outdoor space — default to no outdoor known (conservative)
-    bd.outdoor_space = DEFAULT_OUTDOOR_POINTS
-    flags.append("outdoor_space_assumed_none")
-
-    # 5. Kitchen — default minimal
-    bd.kitchen = DEFAULT_KITCHEN_POINTS
-    flags.append("kitchen_assumed_minimal")
-
-    # 6. Bathroom — default minimal
-    bd.bathroom = DEFAULT_BATHROOM_POINTS
-    flags.append("bathroom_assumed_minimal")
-
-    # 7. Heating — default basic
-    bd.heating = DEFAULT_HEATING_POINTS
-    flags.append("heating_assumed_basic")
 
     bd.flags = flags
 

@@ -55,8 +55,13 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ── LLM feature extraction ──
+    llm_enabled: bool = False
+    gemini_api_key: str | None = None
+    llm_model: str = "gemini-2.5-flash"
+
     # ── Scraper scheduling ──
-    check_interval_min: int = 120  # longer than Kamernet — Playwright is heavier
+    check_interval_min: int = 120
     check_interval_max: int = 300
 
     # ── City / Profile ──
