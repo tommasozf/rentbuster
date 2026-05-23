@@ -41,8 +41,7 @@ class Settings(BaseSettings):
     telegram_password: str | None = Field(
         default=None,
         description=(
-            "Password users send with /start <password> to subscribe. "
-            "Required if TELEGRAM_BOT_TOKEN is set."
+            "Password users send with /start <password> to subscribe. Required if TELEGRAM_BOT_TOKEN is set."
         ),
     )
 

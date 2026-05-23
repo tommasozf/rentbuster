@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import random
 import time
@@ -59,10 +60,8 @@ class RentBuster:
             except Exception as exc:
                 log.error("%s: fetch failed: %s", source.name, exc)
             finally:
-                try:
+                with contextlib.suppress(Exception):
                     asyncio.run(source.close())
-                except Exception:
-                    pass
 
         if not all_listings:
             log.info("no listings returned from any source")
@@ -74,22 +73,22 @@ class RentBuster:
         before = len(all_listings)
         all_listings = self._apply_search_filters(all_listings)
         if len(all_listings) < before:
-            log.info("filtered %d → %d listings (max_rooms=%s, types=%s)",
-                     before, len(all_listings),
-                     self.profile.search.max_rooms or "any",
-                     self.profile.search.property_types or "any")
+            log.info(
+                "filtered %d → %d listings (max_rooms=%s, types=%s)",
+                before,
+                len(all_listings),
+                self.profile.search.max_rooms or "any",
+                self.profile.search.property_types or "any",
+            )
 
         # 3. Deduplicate by address
         deduped = deduplicate(all_listings)
         log.info("total=%d after dedup=%d", len(all_listings), len(deduped))
 
         # 4. Filter new listings
-        new_listings = [
-            l for l in deduped
-            if (l.source.value, l.source_id) not in self.seen_ids
-        ]
-        for l in new_listings:
-            self.seen_ids.add((l.source.value, l.source_id))
+        new_listings = [ls for ls in deduped if (ls.source.value, ls.source_id) not in self.seen_ids]
+        for ls in new_listings:
+            self.seen_ids.add((ls.source.value, ls.source_id))
 
         log.info("new=%d", len(new_listings))
 
@@ -99,10 +98,13 @@ class RentBuster:
             return
 
         # 5. WOZ lookup (check DB cache first)
-        need_woz = [l for l in new_listings if not (l.woz_value and l.woz_verified)]
+        need_woz = [ls for ls in new_listings if not (ls.woz_value and ls.woz_verified)]
         if need_woz:
-            log.info("WOZ lookup for %d listings (skipping %d with verified WOZ)...",
-                     len(need_woz), len(new_listings) - len(need_woz))
+            log.info(
+                "WOZ lookup for %d listings (skipping %d with verified WOZ)...",
+                len(need_woz),
+                len(new_listings) - len(need_woz),
+            )
         for i, listing in enumerate(new_listings):
             self._resolve_woz(listing)
             if need_woz and (i + 1) % 50 == 0:
@@ -144,14 +146,14 @@ class RentBuster:
                 self.db.upsert_listing(listing)
             self.db.touch_listings(
                 "all",
-                [l.source_id for l in deduped],
+                [ls.source_id for ls in deduped],
             )
 
         # 8. Filter bustable listings
         bustable = [
-            l for l in new_listings
-            if l.wws_is_bustable
-            and (l.wws_savings or 0) >= self.profile.wws.min_savings
+            ls
+            for ls in new_listings
+            if ls.wws_is_bustable and (ls.wws_savings or 0) >= self.profile.wws.min_savings
         ]
         log.info(
             "new=%d bustable=%d (min_savings=€%d)",
@@ -160,15 +162,15 @@ class RentBuster:
             self.profile.wws.min_savings,
         )
 
-        for l in bustable:
+        for bl in bustable:
             log.info(
                 "  BUSTABLE: %s %s — €%d asking, €%.0f max, savings €%.0f (conf=%s)",
-                l.street,
-                l.house_number,
-                l.asking_rent,
-                l.wws_max_rent or 0,
-                l.wws_savings or 0,
-                l.wws_confidence.value if l.wws_confidence else "?",
+                bl.street,
+                bl.house_number,
+                bl.asking_rent,
+                bl.wws_max_rent or 0,
+                bl.wws_savings or 0,
+                bl.wws_confidence.value if bl.wws_confidence else "?",
             )
 
         # 9. Notify
@@ -186,6 +188,7 @@ class RentBuster:
         # Write heartbeat for Docker HEALTHCHECK
         try:
             import time as _time
+
             with open("/tmp/rentbuster_last_run", "w") as _f:
                 _f.write(str(int(_time.time())))
         except Exception:
@@ -194,19 +197,18 @@ class RentBuster:
     def _apply_search_filters(self, listings: list[Listing]) -> list[Listing]:
         search = self.profile.search
         result = []
-        for l in listings:
-            if search.max_rooms and l.num_rooms > search.max_rooms:
+        for ls in listings:
+            if search.max_rooms and ls.num_rooms > search.max_rooms:
                 continue
-            if search.property_types and l.property_type and l.property_type not in search.property_types:
+            if search.property_types and ls.property_type and ls.property_type not in search.property_types:
                 continue
-            # Suitability: only exclude if field is explicitly False (keep None = unknown)
-            if search.must_allow_students and l.suitable_for_students is False:
+            if search.must_allow_students and ls.suitable_for_students is False:
                 continue
-            if search.must_allow_sharing and l.suitable_for_sharing is False:
+            if search.must_allow_sharing and ls.suitable_for_sharing is False:
                 continue
-            if search.must_accept_guarantor and l.guarantor_accepted is False:
+            if search.must_accept_guarantor and ls.guarantor_accepted is False:
                 continue
-            result.append(l)
+            result.append(ls)
         return result
 
     def _resolve_woz(self, listing: Listing) -> None:

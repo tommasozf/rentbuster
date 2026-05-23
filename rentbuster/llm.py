@@ -153,9 +153,7 @@ class LLMExtraction:
 
     @property
     def bathroom_points(self) -> float:
-        base = {"basic": 3.0, "standard": 5.0, "full": 8.0, "luxury": 12.0}.get(
-            self.bathroom_quality, 3.0
-        )
+        base = {"basic": 3.0, "standard": 5.0, "full": 8.0, "luxury": 12.0}.get(self.bathroom_quality, 3.0)
         if self.has_bathtub and self.bathroom_quality not in ("full", "luxury"):
             base += 2.0
         if self.has_second_bathroom:
@@ -239,7 +237,7 @@ def _call_gemini(client, model: str, user_msg: str) -> dict | None:
         except Exception as exc:
             exc_str = str(exc)
             if "429" in exc_str or "RESOURCE_EXHAUSTED" in exc_str:
-                wait = _RETRY_BASE_DELAY * (2 ** attempt)
+                wait = _RETRY_BASE_DELAY * (2**attempt)
                 log.warning("llm: rate limited, waiting %ds (attempt %d/%d)", wait, attempt + 1, _MAX_RETRIES)
                 time.sleep(wait)
                 continue
@@ -280,7 +278,7 @@ def extract_batch(
     model: str = _DEFAULT_MODEL,
 ) -> dict[str, LLMExtraction]:
     results: dict[str, LLMExtraction] = {}
-    candidates = [l for l in listings if l.description or l.interior]
+    candidates = [ls for ls in listings if ls.description or ls.interior]
     if not candidates:
         return results
 
@@ -292,9 +290,14 @@ def extract_batch(
             results[key] = extraction
             log.debug(
                 "llm: %d/%d %s %s → outdoor=%.0f kitchen=%.0f bathroom=%.0f heating=%.0f",
-                i + 1, len(candidates), listing.street, listing.house_number,
-                extraction.outdoor_points, extraction.kitchen_points,
-                extraction.bathroom_points, extraction.heating_points,
+                i + 1,
+                len(candidates),
+                listing.street,
+                listing.house_number,
+                extraction.outdoor_points,
+                extraction.kitchen_points,
+                extraction.bathroom_points,
+                extraction.heating_points,
             )
         if i < len(candidates) - 1:
             time.sleep(0.2)

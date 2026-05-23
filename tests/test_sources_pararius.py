@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import pytest
-
+from rentbuster.models import EnergyLabel
 from rentbuster.sources.pararius import (
     _extract_postal_code,
     _parse_address,
     _parse_area,
     _parse_energy_label,
     _parse_price,
-    _parse_rooms,
 )
-from rentbuster.models import EnergyLabel
 
 
 class TestParsePrice:

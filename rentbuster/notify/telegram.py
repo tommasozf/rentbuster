@@ -216,7 +216,9 @@ class TelegramNotifier:
         if run:
             finished = run.get("finished_at")
             lines.append(f"Last run: {finished or run.get('started_at') or 'unknown'}")
-            lines.append(f"Found: {run.get('total_found', 0)} total, {run.get('new_found', 0)} new, {run.get('bustable_found', 0)} bustable")
+            lines.append(
+                f"Found: {run.get('total_found', 0)} total, {run.get('new_found', 0)} new, {run.get('bustable_found', 0)} bustable"
+            )
             if run.get("errors"):
                 lines.append(f"⚠️ Errors: {run['errors']}")
         else:

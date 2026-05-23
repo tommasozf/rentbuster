@@ -93,8 +93,7 @@ def load_profile(name_or_path: str) -> Profile:
         if not path.exists():
             available = sorted(p.stem for p in PROFILES_DIR.glob("*.yaml"))
             raise FileNotFoundError(
-                f"Profile not found: {name_or_path!r}. "
-                f"Looked for {path}. Available profiles: {available}"
+                f"Profile not found: {name_or_path!r}. Looked for {path}. Available profiles: {available}"
             )
     with path.open(encoding="utf-8") as f:
         data = yaml.safe_load(f)

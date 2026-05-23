@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from rentbuster.models import Listing, Source
 from rentbuster.woz import WOZ_ESTIMATE_DEFAULT, WOZ_ESTIMATE_PER_M2, estimate_woz, lookup_woz
 

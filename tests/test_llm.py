@@ -106,7 +106,7 @@ class TestWWSWithLLMExtraction:
     def test_llm_extraction_affects_bustability(self):
         listing = _make_listing(asking_rent=900, surface_area_m2=45)
         bd_default = calculate_wws(_make_listing(asking_rent=900, surface_area_m2=45))
-        was_bustable = listing.wws_is_bustable
+        _was_bustable = listing.wws_is_bustable
 
         listing2 = _make_listing(asking_rent=900, surface_area_m2=45)
         ext = LLMExtraction(
@@ -130,6 +130,10 @@ class TestWWSWithLLMExtraction:
         calculate_wws(listing_llm, llm_extraction=ext)
 
         # LLM extraction removes 4 assumed flags, replaced by 1 "llm_extracted"
-        default_flags = [f for f in listing_default.wws_flags if f.startswith(("outdoor_", "kitchen_", "bathroom_", "heating_"))]
+        default_flags = [
+            f
+            for f in listing_default.wws_flags
+            if f.startswith(("outdoor_", "kitchen_", "bathroom_", "heating_"))
+        ]
         assert len(default_flags) == 4
         assert "llm_extracted" in listing_llm.wws_flags

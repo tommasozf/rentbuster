@@ -264,7 +264,7 @@ class Database:
                     (limit,),
                 )
                 cols = [desc[0] for desc in cur.description]
-                return [dict(zip(cols, row)) for row in cur.fetchall()]
+                return [dict(zip(cols, row, strict=False)) for row in cur.fetchall()]
         except Exception as exc:
             log.warning("get_top_listings failed: %s", exc)
             return []
@@ -311,7 +311,7 @@ class Database:
                 row = cur.fetchone()
                 if row:
                     cols = [desc[0] for desc in cur.description]
-                    return dict(zip(cols, row))
+                    return dict(zip(cols, row, strict=False))
         except Exception as exc:
             log.warning("get_listing_by_id failed: %s", exc)
         return None
@@ -326,7 +326,7 @@ class Database:
                 row = cur.fetchone()
                 if row:
                     cols = [desc[0] for desc in cur.description]
-                    return dict(zip(cols, row))
+                    return dict(zip(cols, row, strict=False))
         except Exception as exc:
             log.warning("get_last_scrape_run failed: %s", exc)
         return None
@@ -362,7 +362,7 @@ class Database:
                     "FROM listings ORDER BY first_seen_at DESC"
                 )
                 cols = [desc[0] for desc in cur.description]
-                return [dict(zip(cols, row)) for row in cur.fetchall()]
+                return [dict(zip(cols, row, strict=False)) for row in cur.fetchall()]
         except Exception as exc:
             log.warning("load_all_listings failed: %s", exc)
             return []

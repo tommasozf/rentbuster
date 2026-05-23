@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from rentbuster.models import Listing, Source, normalize_address
+from rentbuster.models import Listing, Source
 
 
 def deduplicate(listings: list[Listing]) -> list[Listing]:
@@ -51,8 +51,12 @@ def _merge_rb_fields(target: Listing, rb_source: Listing) -> None:
 def _fill_missing(target: Listing, source: Listing) -> None:
     """Copy non-empty fields from source into target where target has empty values."""
     for attr in (
-        "postal_code", "neighborhood", "construction_year",
-        "energy_label", "description", "agency_name",
+        "postal_code",
+        "neighborhood",
+        "construction_year",
+        "energy_label",
+        "description",
+        "agency_name",
     ):
         if not getattr(target, attr) and getattr(source, attr):
             setattr(target, attr, getattr(source, attr))

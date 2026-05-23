@@ -30,9 +30,9 @@ _LISTINGS_PER_PAGE = 10
 # RSC listing card props: {"imageUrl":...,"type":"Appartement"}
 _LISTING_RE = re.compile(r'\{"imageUrl":.*?"type":"[^"]+"\}')
 # Dutch postal code embedded in address string: "1068LD" or "1068 LD"
-_POSTAL_RE = re.compile(r'\b(\d{4})\s*([A-Z]{2})\b')
+_POSTAL_RE = re.compile(r"\b(\d{4})\s*([A-Z]{2})\b")
 # House number with optional letter/hyphen suffix: "21-F", "34C", "86"
-_ADDR_RE = re.compile(r'^(.+?)\s+(\d+[-–]?\d*[A-Za-z]?)\s*([A-Za-z0-9-]*)$')
+_ADDR_RE = re.compile(r"^(.+?)\s+(\d+[-–]?\d*[A-Za-z]?)\s*([A-Za-z0-9-]*)$")
 
 
 def _parse_address(address: str) -> tuple[str, str, str, str]:
@@ -46,7 +46,7 @@ def _parse_address(address: str) -> tuple[str, str, str, str]:
     comma_idx = address.find(",")
     if comma_idx != -1:
         street_part = address[:comma_idx].strip()
-        after_comma = address[comma_idx + 1:].upper()
+        after_comma = address[comma_idx + 1 :].upper()
         pc_m = _POSTAL_RE.search(after_comma)
         if pc_m:
             postal_code = f"{pc_m.group(1)} {pc_m.group(2)}"
@@ -58,7 +58,7 @@ def _parse_address(address: str) -> tuple[str, str, str, str]:
         addition_raw = m.group(3).strip()
         # "21-F" → number="21", addition="F"
         # "21-F" → number="21", addition="F" (letter-only suffix = addition)
-        hyp_letter = re.match(r'^(\d+)[-–]([A-Za-z])$', number_raw)
+        hyp_letter = re.match(r"^(\d+)[-–]([A-Za-z])$", number_raw)
         if hyp_letter and not addition_raw:
             return street, hyp_letter.group(1), hyp_letter.group(2), postal_code
         # "34C-22" → addition starts with "-", keep as part of number
@@ -200,6 +200,7 @@ class RentbusterNLSource:
     def _parse_rsc(self, rsc_text: str) -> list[Listing]:
         """Extract listing objects from RSC streaming payload."""
         import json
+
         listings = []
         for raw in _LISTING_RE.findall(rsc_text):
             try:
@@ -225,13 +226,13 @@ class RentbusterNLSource:
                 log.info("rent-buster.nl: no listings on page %d, stopping", page)
                 break
 
-            new = [l for l in page_listings if l.source_id not in seen]
+            new = [ls for ls in page_listings if ls.source_id not in seen]
             if not new:
                 log.info("rent-buster.nl: no new listings on page %d, stopping", page)
                 break
 
-            for l in new:
-                seen.add(l.source_id)
+            for ls in new:
+                seen.add(ls.source_id)
             listings.extend(new)
             log.info("rent-buster.nl: page %d → %d listings (total: %d)", page, len(new), len(listings))
 

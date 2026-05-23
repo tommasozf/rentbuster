@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from rentbuster.models import EnergyLabel, Listing, Source, normalize_address
 
 
@@ -65,7 +63,14 @@ class TestListing:
         listing = Listing(source=Source.PARARIUS, source_id="x", url="http://example.com")
         params = listing.to_db_params()
         required_keys = {
-            "source", "source_id", "url", "asking_rent", "wws_is_bustable",
-            "woz_value", "woz_verified", "images", "wws_flags",
+            "source",
+            "source_id",
+            "url",
+            "asking_rent",
+            "wws_is_bustable",
+            "woz_value",
+            "woz_verified",
+            "images",
+            "wws_flags",
         }
         assert required_keys.issubset(params.keys())

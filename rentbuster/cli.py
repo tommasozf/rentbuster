@@ -55,7 +55,17 @@ def _cmd_top(args: argparse.Namespace) -> int:
         print("No bustable listings found.")
         return 0
 
-    col_widths = {"rank": 4, "address": 35, "asking": 10, "max_rent": 10, "pts": 6, "savings": 10, "conf": 10, "score": 8, "source": 14}
+    col_widths = {
+        "rank": 4,
+        "address": 35,
+        "asking": 10,
+        "max_rent": 10,
+        "pts": 6,
+        "savings": 10,
+        "conf": 10,
+        "score": 8,
+        "source": 14,
+    }
     header = (
         f"{'#':<{col_widths['rank']}} "
         f"{'Address':<{col_widths['address']}} "
@@ -92,7 +102,7 @@ def _cmd_top(args: argparse.Namespace) -> int:
 
         print(
             f"{i:<{col_widths['rank']}} "
-            f"{full_addr[:col_widths['address']]:<{col_widths['address']}} "
+            f"{full_addr[: col_widths['address']]:<{col_widths['address']}} "
             f"€{asking:>{col_widths['asking'] - 1}} "
             f"€{max_rent:>{col_widths['max_rent'] - 1}.0f} "
             f"{pts:>{col_widths['pts']}.0f} "
@@ -109,6 +119,7 @@ def _cmd_top(args: argparse.Namespace) -> int:
 
 def _cmd_recalculate(args: argparse.Namespace) -> int:
     import json
+
     from rentbuster.llm import LLMExtraction, extract_batch
     from rentbuster.models import EnergyLabel, Listing, Source
     from rentbuster.woz import lookup_woz
@@ -133,34 +144,36 @@ def _cmd_recalculate(args: argparse.Namespace) -> int:
         images = r["images"] or "[]"
         if isinstance(images, str):
             images = json.loads(images)
-        listings.append(Listing(
-            source=Source(r["source"]),
-            source_id=r["source_id"],
-            url=r["url"],
-            street=r.get("street") or "",
-            house_number=r.get("house_number") or "",
-            house_number_addition=r.get("house_number_addition") or "",
-            postal_code=r.get("postal_code") or "",
-            city=r.get("city") or "",
-            neighborhood=r.get("neighborhood") or "",
-            asking_rent=r.get("asking_rent") or 0,
-            surface_area_m2=r.get("surface_area_m2") or 0,
-            num_rooms=r.get("num_rooms") or 0,
-            energy_label=EnergyLabel.from_string(r.get("energy_label")),
-            construction_year=r.get("construction_year"),
-            property_type=r.get("property_type") or "",
-            interior=r.get("interior") or "",
-            description=r.get("description") or "",
-            images=images,
-            available_from=r.get("available_from") or "",
-            agency_name=r.get("agency_name") or "",
-            woz_value=r.get("woz_value"),
-            woz_reference_date=r.get("woz_reference_date"),
-            woz_verified=bool(r.get("woz_verified")),
-            rb_estimated_max_rent=r.get("rb_estimated_max_rent"),
-            rb_savings=r.get("rb_savings"),
-            rb_confidence=r.get("rb_confidence"),
-        ))
+        listings.append(
+            Listing(
+                source=Source(r["source"]),
+                source_id=r["source_id"],
+                url=r["url"],
+                street=r.get("street") or "",
+                house_number=r.get("house_number") or "",
+                house_number_addition=r.get("house_number_addition") or "",
+                postal_code=r.get("postal_code") or "",
+                city=r.get("city") or "",
+                neighborhood=r.get("neighborhood") or "",
+                asking_rent=r.get("asking_rent") or 0,
+                surface_area_m2=r.get("surface_area_m2") or 0,
+                num_rooms=r.get("num_rooms") or 0,
+                energy_label=EnergyLabel.from_string(r.get("energy_label")),
+                construction_year=r.get("construction_year"),
+                property_type=r.get("property_type") or "",
+                interior=r.get("interior") or "",
+                description=r.get("description") or "",
+                images=images,
+                available_from=r.get("available_from") or "",
+                agency_name=r.get("agency_name") or "",
+                woz_value=r.get("woz_value"),
+                woz_reference_date=r.get("woz_reference_date"),
+                woz_verified=bool(r.get("woz_verified")),
+                rb_estimated_max_rent=r.get("rb_estimated_max_rent"),
+                rb_savings=r.get("rb_savings"),
+                rb_confidence=r.get("rb_confidence"),
+            )
+        )
 
     extractions: dict[str, LLMExtraction] = {}
     if settings.llm_enabled and settings.gemini_api_key:

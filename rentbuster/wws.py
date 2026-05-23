@@ -11,11 +11,10 @@ https://www.huurcommissie.nl/onderwerpen/wws
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-
-from rentbuster.models import ConfidenceLevel, EnergyLabel, Listing
-from rentbuster.woz import WOZ_ESTIMATE_DEFAULT, WOZ_ESTIMATE_PER_M2
-
 from typing import TYPE_CHECKING
+
+from rentbuster.models import ConfidenceLevel, Listing
+from rentbuster.woz import WOZ_ESTIMATE_DEFAULT, WOZ_ESTIMATE_PER_M2
 
 if TYPE_CHECKING:
     from rentbuster.llm import LLMExtraction
@@ -46,9 +45,9 @@ WOZ_MAX_PERCENTAGE = 0.33  # WOZ points cannot exceed 33% of total
 
 # Conservative defaults when detail data is missing (intentionally low = more likely flagged)
 DEFAULT_OUTDOOR_POINTS = -5.0  # no outdoor space known
-DEFAULT_KITCHEN_POINTS = 4.0   # minimal kitchen
+DEFAULT_KITCHEN_POINTS = 4.0  # minimal kitchen
 DEFAULT_BATHROOM_POINTS = 3.0  # minimal bathroom
-DEFAULT_HEATING_POINTS = 2.0   # basic heating
+DEFAULT_HEATING_POINTS = 2.0  # basic heating
 
 # Bijlage 3 — rent table anchor points (Huurcommissie 2025).
 # Linear interpolation used between these anchors; extrapolated above 187 pts.
@@ -121,6 +120,7 @@ def points_to_max_rent(points: float) -> float:
 
 # ── Breakdown dataclass ────────────────────────────────────────────────────────
 
+
 @dataclass
 class WWSBreakdown:
     surface_area: float = 0.0
@@ -160,6 +160,7 @@ class WWSBreakdown:
 
 
 # ── Calculator ─────────────────────────────────────────────────────────────────
+
 
 def calculate_wws(listing: Listing, llm_extraction: LLMExtraction | None = None) -> WWSBreakdown:
     """Calculate WWS points for a listing; mutates listing in place with results.
@@ -223,7 +224,9 @@ def calculate_wws(listing: Listing, llm_extraction: LLMExtraction | None = None)
         flags.append("heating_assumed_basic")
 
     # 33% cap: WOZ points cannot exceed 33% of total
-    subtotal_without_woz = bd.surface_area + bd.energy_label + bd.outdoor_space + bd.kitchen + bd.bathroom + bd.heating
+    subtotal_without_woz = (
+        bd.surface_area + bd.energy_label + bd.outdoor_space + bd.kitchen + bd.bathroom + bd.heating
+    )
     max_woz = (WOZ_MAX_PERCENTAGE / (1 - WOZ_MAX_PERCENTAGE)) * subtotal_without_woz
     bd.woz_capped = round(min(woz_uncapped, max_woz), 2)
 
@@ -236,10 +239,12 @@ def calculate_wws(listing: Listing, llm_extraction: LLMExtraction | None = None)
     savings = listing.asking_rent - max_rent if is_bustable else 0.0
 
     # Confidence: based on data completeness
-    critical_missing = sum([
-        "woz_estimated_conservative" in flags,
-        "surface_area_unknown" in flags,
-    ])
+    critical_missing = sum(
+        [
+            "woz_estimated_conservative" in flags,
+            "surface_area_unknown" in flags,
+        ]
+    )
     if critical_missing == 0 and len(flags) <= 3:
         confidence = ConfidenceLevel.HIGH
     elif critical_missing == 0:

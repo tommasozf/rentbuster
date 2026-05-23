@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from rentbuster.dedup import deduplicate
 from rentbuster.models import EnergyLabel, Listing, Source
 
@@ -38,8 +36,15 @@ class TestDeduplicate:
         assert len(result) == 1
 
     def test_pararius_preferred_over_rentbuster_nl(self):
-        rb = _listing(Source.RENTBUSTER_NL, "rb-1", "Keizersgracht", "10",
-                      rb_estimated_max_rent=800.0, rb_savings=200.0, rb_confidence="high")
+        rb = _listing(
+            Source.RENTBUSTER_NL,
+            "rb-1",
+            "Keizersgracht",
+            "10",
+            rb_estimated_max_rent=800.0,
+            rb_savings=200.0,
+            rb_confidence="high",
+        )
         par = _listing(Source.PARARIUS, "par-1", "Keizersgracht", "10")
         result = deduplicate([rb, par])
         assert len(result) == 1
@@ -49,8 +54,9 @@ class TestDeduplicate:
 
     def test_rentbuster_nl_data_merged_into_pararius(self):
         par = _listing(Source.PARARIUS, "par-1", "Keizersgracht", "10")
-        rb = _listing(Source.RENTBUSTER_NL, "rb-1", "Keizersgracht", "10",
-                      rb_estimated_max_rent=750.0, rb_savings=100.0)
+        rb = _listing(
+            Source.RENTBUSTER_NL, "rb-1", "Keizersgracht", "10", rb_estimated_max_rent=750.0, rb_savings=100.0
+        )
         result = deduplicate([par, rb])
         assert len(result) == 1
         assert result[0].source == Source.PARARIUS
@@ -74,8 +80,7 @@ class TestDeduplicate:
 
     def test_fill_missing_energy_label(self):
         par = _listing(Source.PARARIUS, "1", "Keizersgracht", "10")
-        par2 = _listing(Source.PARARIUS, "2", "Keizersgracht", "10",
-                        energy_label=EnergyLabel.B)
+        par2 = _listing(Source.PARARIUS, "2", "Keizersgracht", "10", energy_label=EnergyLabel.B)
         result = deduplicate([par, par2])
         assert len(result) == 1
         assert result[0].energy_label == EnergyLabel.B

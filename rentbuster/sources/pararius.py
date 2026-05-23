@@ -10,7 +10,6 @@ import asyncio
 import logging
 import random
 import re
-from typing import Any
 
 from rentbuster.models import EnergyLabel, Listing, Source
 
@@ -130,6 +129,7 @@ def _parse_yes_no(val_lower: str) -> bool | None:
 
 # ── Pararius source ────────────────────────────────────────────────────────────
 
+
 class ParariusSource:
     name = "pararius"
 
@@ -219,13 +219,13 @@ class ParariusSource:
                 log.error("pararius: error on page %d: %s", page_num, exc)
                 break
 
-            new = [l for l in page_listings if l.source_id not in seen_ids]
+            new = [ls for ls in page_listings if ls.source_id not in seen_ids]
             if not new:
                 log.info("pararius: no new listings on page %d, stopping", page_num)
                 break
 
-            for l in new:
-                seen_ids.add(l.source_id)
+            for ls in new:
+                seen_ids.add(ls.source_id)
             listings.extend(new)
             log.info("pararius: page %d → %d listings (total: %d)", page_num, len(new), len(listings))
 
@@ -233,14 +233,18 @@ class ParariusSource:
                 await asyncio.sleep(random.uniform(2.0, 5.0))
 
         if self.fetch_details and listings:
-            detail_candidates = [l for l in listings if self._worth_detail_fetch(l)]
+            detail_candidates = [ls for ls in listings if self._worth_detail_fetch(ls)]
             skipped = len(listings) - len(detail_candidates)
             if skipped:
-                log.info("pararius: skipped %d listings (filters), fetching details for %d (5 parallel)", skipped, len(detail_candidates))
+                log.info(
+                    "pararius: skipped %d listings (filters), fetching details for %d (5 parallel)",
+                    skipped,
+                    len(detail_candidates),
+                )
             else:
                 log.info("pararius: fetching details for %d listings (5 parallel)", len(detail_candidates))
             sem = asyncio.Semaphore(5)
-            tasks = [self._fetch_detail(l, sem) for l in detail_candidates]
+            tasks = [self._fetch_detail(ls, sem) for ls in detail_candidates]
             await asyncio.gather(*tasks)
 
         return listings
@@ -248,9 +252,7 @@ class ParariusSource:
     def _worth_detail_fetch(self, listing: Listing) -> bool:
         if self.property_types and listing.property_type not in self.property_types:
             return False
-        if self.max_rooms and listing.num_rooms > self.max_rooms:
-            return False
-        return True
+        return not (self.max_rooms and listing.num_rooms > self.max_rooms)
 
     async def _parse_listing_cards(self, page) -> list[Listing]:
         # Verified selector: li.search-list__item--listing (2026-05-22)
@@ -323,7 +325,7 @@ class ParariusSource:
 
         # Agency — verified: .listing-search-item__agent
         agency_el = await card.query_selector(".listing-search-item__agent")
-        agency_name = (await agency_el.inner_text()).strip() if agency_el else ""
+        _agency_text = (await agency_el.inner_text()).strip() if agency_el else ""
 
         # Image
         img_el = await card.query_selector("img.picture__image")
@@ -386,7 +388,7 @@ class ParariusSource:
         # Feature dt/dd table — verified structure (2026-05-22)
         dts = await page.query_selector_all("dt")
         dds = await page.query_selector_all("dd")
-        for dt, dd in zip(dts, dds):
+        for dt, dd in zip(dts, dds, strict=False):
             key = (await dt.inner_text()).strip().lower()
             val = (await dd.inner_text()).strip()
             if not val or "more info" in val.lower():

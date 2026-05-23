@@ -96,8 +96,7 @@ def format_listing(listing: Listing) -> DiscordEmbed:
     if listing.wws_flags:
         # Show the most important flags (not the trivial defaults)
         important_flags = [
-            f for f in listing.wws_flags
-            if "assumed" in f or "unknown" in f or "estimated" in f
+            f for f in listing.wws_flags if "assumed" in f or "unknown" in f or "estimated" in f
         ]
         if important_flags:
             embed.add_embed_field(
@@ -124,7 +123,7 @@ def format_listing(listing: Listing) -> DiscordEmbed:
 
 def _summary_header(listings: list[Listing], total_batches: int) -> DiscordEmbed:
     n = len(listings)
-    savings_vals = [l.wws_savings for l in listings if l.wws_savings]
+    savings_vals = [ls.wws_savings for ls in listings if ls.wws_savings]
     min_s = min(savings_vals) if savings_vals else 0
     max_s = max(savings_vals) if savings_vals else 0
 
@@ -154,7 +153,7 @@ class DiscordNotifier:
         if not listings:
             return
 
-        sorted_listings = sorted(listings, key=lambda l: -(l.wws_savings or 0))
+        sorted_listings = sorted(listings, key=lambda x: -(x.wws_savings or 0))
         total_batches = (len(sorted_listings) + BATCH_SIZE - 1) // BATCH_SIZE
 
         for batch_num in range(total_batches):
@@ -193,9 +192,7 @@ class DiscordNotifier:
                     single.add_embed(format_listing(listing))
                     single_resp = single.execute()
                     if single_resp.status_code not in (200, 204):
-                        log.warning(
-                            "discord individual send failed: %s", single_resp.status_code
-                        )
+                        log.warning("discord individual send failed: %s", single_resp.status_code)
                     time.sleep(1)
 
             if batch_num < total_batches - 1:

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from rentbuster.models import ConfidenceLevel, EnergyLabel, Listing, Source
 from rentbuster.wws import (
     ENERGY_POINTS_APARTMENT,
@@ -92,10 +90,9 @@ class TestCalculateWWS:
         )
         calculate_wws(listing)
         # 30m² + G label (-15) + minimal defaults should be well below threshold
-        if listing.wws_points < LIBERALIZATION_THRESHOLD:
-            if listing.asking_rent > listing.wws_max_rent:
-                assert listing.wws_is_bustable
-                assert listing.wws_savings > 0
+        if listing.wws_points < LIBERALIZATION_THRESHOLD and listing.asking_rent > listing.wws_max_rent:
+            assert listing.wws_is_bustable
+            assert listing.wws_savings > 0
 
     def test_high_points_not_bustable(self):
         # Large apartment with high WOZ should exceed liberalization threshold
