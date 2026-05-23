@@ -68,24 +68,11 @@ def _pdok_nummeraanduiding(
     return None
 
 
-def lookup_woz_kadaster(
-    postal_code: str,
-    house_number: str,
-    addition: str,
-    session: requests.Session | None = None,
-) -> WOZResult | None:
-    """Lookup WOZ value via PDOK geocoding + Kadaster LV-WOZ API. No API key needed."""
-    _session = session or requests.Session()
-
-    nid = _pdok_nummeraanduiding(postal_code, house_number, addition, _session)
-    if not nid:
-        log.debug("woz: no nummeraanduiding for %s %s", postal_code, house_number)
-        return None
-
-    # API expects 16-char zero-padded ID
+def _fetch_woz_for_nid(nid: str, session: requests.Session) -> WOZResult | None:
+    """Fetch WOZ value from Kadaster for a given nummeraanduiding ID."""
     nid_padded = nid.zfill(16)
     try:
-        resp = _session.get(
+        resp = session.get(
             f"{_WOZ_URL}/{nid_padded}",
             headers={
                 "Accept": "application/json",
@@ -104,10 +91,9 @@ def lookup_woz_kadaster(
 
     waarden = data.get("wozWaarden") or []
     if not waarden:
-        log.debug("woz: no wozWaarden in response for %s %s", postal_code, house_number)
+        log.debug("woz: no wozWaarden in response for nid %s", nid_padded)
         return None
 
-    # Take the most recent peildatum
     most_recent = max(waarden, key=lambda w: w.get("peildatum") or "")
     value = most_recent.get("vastgesteldeWaarde")
     if not value:
@@ -119,6 +105,40 @@ def lookup_woz_kadaster(
         verified=True,
         source="kadaster",
     )
+
+
+def lookup_woz_kadaster(
+    postal_code: str,
+    house_number: str,
+    addition: str,
+    session: requests.Session | None = None,
+) -> WOZResult | None:
+    """Lookup WOZ value via PDOK geocoding + Kadaster LV-WOZ API. No API key needed."""
+    _session = session or requests.Session()
+
+    nid = _pdok_nummeraanduiding(postal_code, house_number, addition, _session)
+    if nid:
+        result = _fetch_woz_for_nid(nid, _session)
+        if result:
+            return result
+
+    # If exact match failed and there's an addition, retry without it (sibling unit)
+    if addition:
+        log.debug("woz: retrying without addition for %s %s", postal_code, house_number)
+        nid_sibling = _pdok_nummeraanduiding(postal_code, house_number, "", _session)
+        if nid_sibling and nid_sibling != (nid or ""):
+            result = _fetch_woz_for_nid(nid_sibling, _session)
+            if result:
+                log.debug("woz: sibling match for %s %s", postal_code, house_number)
+                return WOZResult(
+                    value=result.value,
+                    reference_date=result.reference_date,
+                    verified=True,
+                    source="kadaster_sibling",
+                )
+
+    log.debug("woz: no nummeraanduiding for %s %s %s", postal_code, house_number, addition)
+    return None
 
 
 def estimate_woz(city: str, surface_area_m2: int) -> WOZResult:
@@ -174,4 +194,6 @@ def lookup_woz(listing: Listing) -> WOZResult:
     listing.woz_value = result.value
     listing.woz_reference_date = result.reference_date
     listing.woz_verified = result.verified
+    # Store source for downstream use (wws.py reads _woz_source)
+    listing._woz_source = result.source  # type: ignore[attr-defined]
     return result

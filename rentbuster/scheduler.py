@@ -113,6 +113,18 @@ class RentBuster:
         if self.settings.llm_enabled and self.settings.gemini_api_key:
             extractions = extract_batch(new_listings, self.settings.gemini_api_key, self.settings.llm_model)
 
+        # 6b. Merge LLM suitability fields when detail parsing didn't find them
+        for listing in new_listings:
+            key = f"{listing.source.value}:{listing.source_id}"
+            ext = extractions.get(key)
+            if ext:
+                if listing.suitable_for_students is None:
+                    listing.suitable_for_students = ext.suitable_for_students
+                if listing.suitable_for_sharing is None:
+                    listing.suitable_for_sharing = ext.suitable_for_sharing
+                if listing.guarantor_accepted is None:
+                    listing.guarantor_accepted = ext.guarantor_accepted
+
         # 7. Calculate WWS points
         for listing in new_listings:
             key = f"{listing.source.value}:{listing.source_id}"
@@ -171,6 +183,14 @@ class RentBuster:
             self.db.mark_disappeared()
             self.db.log_scrape_run("all", len(all_listings), len(new_listings), len(bustable))
 
+        # Write heartbeat for Docker HEALTHCHECK
+        try:
+            import time as _time
+            with open("/tmp/rentbuster_last_run", "w") as _f:
+                _f.write(str(int(_time.time())))
+        except Exception:
+            pass
+
     def _apply_search_filters(self, listings: list[Listing]) -> list[Listing]:
         search = self.profile.search
         result = []
@@ -178,6 +198,13 @@ class RentBuster:
             if search.max_rooms and l.num_rooms > search.max_rooms:
                 continue
             if search.property_types and l.property_type and l.property_type not in search.property_types:
+                continue
+            # Suitability: only exclude if field is explicitly False (keep None = unknown)
+            if search.must_allow_students and l.suitable_for_students is False:
+                continue
+            if search.must_allow_sharing and l.suitable_for_sharing is False:
+                continue
+            if search.must_accept_guarantor and l.guarantor_accepted is False:
                 continue
             result.append(l)
         return result
@@ -195,6 +222,7 @@ class RentBuster:
                 listing.woz_value = cached["value"]
                 listing.woz_reference_date = cached["reference_date"]
                 listing.woz_verified = cached["verified"]
+                listing._woz_source = cached.get("source", "")  # type: ignore[attr-defined]
                 return
 
         result = lookup_woz(listing)

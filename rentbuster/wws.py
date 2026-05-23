@@ -186,10 +186,13 @@ def calculate_wws(listing: Listing, llm_extraction: LLMExtraction | None = None)
 
     # 3. WOZ value — two-part formula with 33% cap
     city_key = (listing.city or "").lower().strip()
+    woz_source = getattr(listing, "_woz_source", None)
     if listing.woz_value and listing.woz_value > 0:
         woz = listing.woz_value
         if not listing.woz_verified:
             flags.append("woz_estimated")
+        elif woz_source == "kadaster_sibling":
+            flags.append("woz_sibling")
     else:
         m2 = listing.surface_area_m2 or 50
         per_m2 = WOZ_ESTIMATE_PER_M2.get(city_key, WOZ_ESTIMATE_DEFAULT)
@@ -249,7 +252,12 @@ def calculate_wws(listing: Listing, llm_extraction: LLMExtraction | None = None)
     # Confidence multipliers for bust_score
     _CONFIDENCE_MULT = {"HIGH": 1.0, "MEDIUM": 0.8, "LOW": 0.5, "VERY_LOW": 0.3}
     confidence_mult = _CONFIDENCE_MULT.get(confidence.value, 0.5)
-    woz_mult = 1.0 if listing.woz_verified else 0.7
+    if listing.woz_verified and "woz_sibling" in flags:
+        woz_mult = 0.9  # sibling unit — slightly less certain than exact match
+    elif listing.woz_verified:
+        woz_mult = 1.0
+    else:
+        woz_mult = 0.7
     bust_score = (savings or 0) * confidence_mult * woz_mult
 
     # Mutate listing

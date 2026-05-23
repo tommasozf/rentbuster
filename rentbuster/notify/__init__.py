@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from rentbuster.config import Settings
 from rentbuster.db import Database
 from rentbuster.models import Listing
+
+if TYPE_CHECKING:
+    from rentbuster.profile import Profile
 
 log = logging.getLogger(__name__)
 
@@ -52,7 +55,11 @@ class NotifierBundle:
                     log.error("%s command processing failed: %s", notifier.name, exc)
 
 
-def build_notifiers(settings: Settings, db: Database | None) -> NotifierBundle:
+def build_notifiers(
+    settings: Settings,
+    db: Database | None,
+    profile: Profile | None = None,
+) -> NotifierBundle:
     notifiers: list[Notifier] = []
 
     if settings.discord_webhook_url:
@@ -79,6 +86,7 @@ def build_notifiers(settings: Settings, db: Database | None) -> NotifierBundle:
                     bot_token=settings.telegram_bot_token,
                     password=settings.telegram_password,
                     db=db,
+                    profile=profile,
                 )
             )
 

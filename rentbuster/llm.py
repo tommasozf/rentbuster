@@ -64,6 +64,21 @@ _RESPONSE_SCHEMA = {
             "type": "STRING",
             "description": "Brief note on confidence: what was explicitly stated vs. inferred.",
         },
+        "suitable_for_students": {
+            "type": "BOOLEAN",
+            "nullable": True,
+            "description": "Whether the listing explicitly allows students. null if not mentioned.",
+        },
+        "suitable_for_sharing": {
+            "type": "BOOLEAN",
+            "nullable": True,
+            "description": "Whether the listing explicitly allows sharing / co-tenants. null if not mentioned.",
+        },
+        "guarantor_accepted": {
+            "type": "BOOLEAN",
+            "nullable": True,
+            "description": "Whether a guarantor/borg is accepted. null if not mentioned.",
+        },
     },
     "required": [
         "has_private_outdoor",
@@ -76,6 +91,9 @@ _RESPONSE_SCHEMA = {
         "has_second_bathroom",
         "heating_type",
         "confidence_notes",
+        "suitable_for_students",
+        "suitable_for_sharing",
+        "guarantor_accepted",
     ],
 }
 
@@ -91,11 +109,13 @@ than over-counting because it makes the listing more likely to be flagged as ove
 - "Gemeubileerd"/"furnished" does NOT imply kitchen appliances are built-in fixtures.
 - A "kitchen" with no further detail = "minimal".
 - If outdoor space is mentioned without size, estimate conservatively.
+- For tenant suitability fields, only set true/false if EXPLICITLY stated; otherwise null.
 - Dutch terms: balkon = balcony, dakterras = roof terrace, tuin = garden, \
 terras = terrace, loggia = loggia, vloerverwarming = floor heating, \
 CV-ketel = central heating, stadsverwarming = district heating, \
 vaatwasser = dishwasher, oven, koelkast = fridge, magnetron = microwave, \
-ligbad = bathtub, douche = shower, wastafel = sink, 2e toilet = second toilet.\
+ligbad = bathtub, douche = shower, wastafel = sink, 2e toilet = second toilet, \
+studenten = students, gedeeld = shared, garant/borg = guarantor.\
 """
 
 
@@ -111,6 +131,9 @@ class LLMExtraction:
     has_second_bathroom: bool = False
     heating_type: str = "unknown"
     confidence_notes: str = ""
+    suitable_for_students: bool | None = None
+    suitable_for_sharing: bool | None = None
+    guarantor_accepted: bool | None = None
 
     @property
     def outdoor_points(self) -> float:
@@ -171,6 +194,10 @@ def _build_user_message(listing: Listing) -> str:
 
 
 def _parse_response(data: dict) -> LLMExtraction:
+    def _nullable_bool(key: str) -> bool | None:
+        v = data.get(key)
+        return None if v is None else bool(v)
+
     return LLMExtraction(
         has_private_outdoor=bool(data.get("has_private_outdoor", False)),
         outdoor_area_m2=data.get("outdoor_area_m2"),
@@ -182,6 +209,9 @@ def _parse_response(data: dict) -> LLMExtraction:
         has_second_bathroom=bool(data.get("has_second_bathroom", False)),
         heating_type=data.get("heating_type", "unknown"),
         confidence_notes=data.get("confidence_notes", ""),
+        suitable_for_students=_nullable_bool("suitable_for_students"),
+        suitable_for_sharing=_nullable_bool("suitable_for_sharing"),
+        guarantor_accepted=_nullable_bool("guarantor_accepted"),
     )
 
 

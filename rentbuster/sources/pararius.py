@@ -117,6 +117,17 @@ def _parse_construction_year(text: str) -> int | None:
     return int(m.group()) if m else None
 
 
+def _parse_yes_no(val_lower: str) -> bool | None:
+    """Parse yes/no/allowed/not-allowed in Dutch and English."""
+    positive = ("yes", "ja", "allowed", "toegestaan", "accepted", "geaccepteerd", "wel")
+    negative = ("no", "nee", "niet", "not allowed", "not accepted", "geen")
+    if any(w in val_lower for w in positive):
+        return True
+    if any(w in val_lower for w in negative):
+        return False
+    return None
+
+
 # ── Pararius source ────────────────────────────────────────────────────────────
 
 class ParariusSource:
@@ -400,6 +411,18 @@ class ParariusSource:
                 listing.available_from = val
             elif "type of house" in key and not listing.property_type:
                 listing.property_type = val.split("\n")[0].lower()
+            elif any(kw in key for kw in ("geschikt voor", "suitable for", "tenant type")):
+                val_lower = val.lower()
+                if "student" in key or "student" in val_lower:
+                    listing.suitable_for_students = _parse_yes_no(val_lower)
+                if "sharing" in key or "samen" in val_lower or "sharing" in val_lower:
+                    listing.suitable_for_sharing = _parse_yes_no(val_lower)
+            elif "student" in key:
+                listing.suitable_for_students = _parse_yes_no(val.lower())
+            elif "sharing" in key or "samen" in key:
+                listing.suitable_for_sharing = _parse_yes_no(val.lower())
+            elif any(kw in key for kw in ("garant", "borg", "guarantor")):
+                listing.guarantor_accepted = _parse_yes_no(val.lower())
 
         # Description — verified: [class*=description]
         desc_el = await page.query_selector("[class*=description] p, [class*=description]")

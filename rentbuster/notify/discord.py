@@ -14,6 +14,12 @@ log = logging.getLogger(__name__)
 BATCH_SIZE = 9  # 10-embed Discord limit minus 1 for summary header
 
 
+def _truncate(text: str, max_len: int) -> str:
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 3] + "..."
+
+
 def _embed_color(listing: Listing) -> int:
     savings = listing.wws_savings or 0
     if savings > 200:
@@ -44,10 +50,11 @@ def format_listing(listing: Listing) -> DiscordEmbed:
     points = listing.wws_points or 0
 
     embed = DiscordEmbed(
-        title=f"Bustable: {address}, {city}",
-        description=(
+        title=_truncate(f"Bustable: {address}, {city}", 256),
+        description=_truncate(
             f"**€{listing.asking_rent}/mo** asking vs **€{max_rent:.0f}/mo** legal maximum\n"
-            f"Save **€{savings:.0f}/mo** (€{savings * 12:.0f}/yr) by disputing with Huurcommissie"
+            f"Save **€{savings:.0f}/mo** (€{savings * 12:.0f}/yr) by disputing with Huurcommissie",
+            500,
         ),
         url=listing.url,
         color=_embed_color(listing),
@@ -67,9 +74,16 @@ def format_listing(listing: Listing) -> DiscordEmbed:
     embed.add_embed_field(name="📐 Size", value=size_info, inline=True)
 
     energy = listing.energy_label.value if listing.energy_label else "unknown"
-    woz_info = f"WOZ €{listing.woz_value:,}" if listing.woz_value else "estimated"
-    if not listing.woz_verified:
-        woz_info += " (est.)"
+    if listing.woz_value:
+        flags = listing.wws_flags or []
+        if "woz_sibling" in flags:
+            woz_info = f"WOZ €{listing.woz_value:,} (neighboring unit)"
+        elif not listing.woz_verified:
+            woz_info = f"⚠️ WOZ €{listing.woz_value:,} (ESTIMATED)"
+        else:
+            woz_info = f"WOZ €{listing.woz_value:,}"
+    else:
+        woz_info = "⚠️ WOZ ESTIMATED"
     embed.add_embed_field(name="⚡ Energy / WOZ", value=f"{energy} • {woz_info}", inline=True)
 
     conf_emoji = _confidence_emoji(listing)
@@ -81,11 +95,14 @@ def format_listing(listing: Listing) -> DiscordEmbed:
 
     if listing.wws_flags:
         # Show the most important flags (not the trivial defaults)
-        important_flags = [f for f in listing.wws_flags if "assumed" in f or "unknown" in f]
+        important_flags = [
+            f for f in listing.wws_flags
+            if "assumed" in f or "unknown" in f or "estimated" in f
+        ]
         if important_flags:
             embed.add_embed_field(
                 name="⚠️ Assumptions",
-                value="\n".join(f"• {f}" for f in important_flags[:4]),
+                value=_truncate("\n".join(f"• {f}" for f in important_flags[:4]), 1024),
                 inline=False,
             )
 
@@ -161,7 +178,25 @@ class DiscordNotifier:
             if resp.status_code in (200, 204):
                 log.info("discord batch %d/%d sent", batch_num + 1, total_batches)
             else:
-                log.warning("discord webhook failed: %s", resp.status_code)
+                try:
+                    body = resp.text
+                except Exception:
+                    body = str(resp.content)
+                log.warning(
+                    "discord webhook failed: %s — body: %s — retrying individually",
+                    resp.status_code,
+                    body[:500],
+                )
+                # Retry: send each embed as its own message (guaranteed under limits)
+                for listing in batch:
+                    single = DiscordWebhook(url=self.webhook_url)
+                    single.add_embed(format_listing(listing))
+                    single_resp = single.execute()
+                    if single_resp.status_code not in (200, 204):
+                        log.warning(
+                            "discord individual send failed: %s", single_resp.status_code
+                        )
+                    time.sleep(1)
 
             if batch_num < total_batches - 1:
                 time.sleep(3)

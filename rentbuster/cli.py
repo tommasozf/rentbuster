@@ -220,7 +220,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     else:
         logging.warning("DATABASE_URL not set — running without persistence")
 
-    notifiers = build_notifiers(settings, db)
+    notifiers = build_notifiers(settings, db, profile=profile)
     rentbuster = RentBuster(
         settings=settings,
         profile=profile,

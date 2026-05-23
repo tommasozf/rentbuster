@@ -30,7 +30,7 @@ class TestEstimateWoz:
 
 
 class TestLookupWoz:
-    def test_no_api_key_returns_estimate(self):
+    def test_no_postal_code_returns_estimate(self):
         listing = Listing(
             source=Source.PARARIUS,
             source_id="x",
@@ -38,7 +38,8 @@ class TestLookupWoz:
             city="amsterdam",
             surface_area_m2=60,
         )
-        result = lookup_woz(listing, api_key=None)
+        result = lookup_woz(listing)
+        # No postal code → falls back to estimate
         assert not result.verified
         assert listing.woz_value is not None
         assert listing.woz_verified is False
@@ -51,6 +52,7 @@ class TestLookupWoz:
             city="rotterdam",
             surface_area_m2=50,
         )
-        lookup_woz(listing, api_key=None)
+        lookup_woz(listing)
+        # No postal code/house_number → estimate used
         assert listing.woz_value == 50 * WOZ_ESTIMATE_PER_M2["rotterdam"]
         assert listing.woz_reference_date is not None

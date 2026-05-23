@@ -34,7 +34,7 @@ COPY rentbuster/ ./rentbuster/
 COPY profiles/ ./profiles/
 COPY schema.sql ./
 
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --extra llm
 
 # Install Playwright Chromium browser
 RUN /app/.venv/bin/playwright install chromium
@@ -43,8 +43,8 @@ RUN useradd --create-home --uid 1000 rentbuster \
     && chown -R rentbuster:rentbuster /app
 USER rentbuster
 
-HEALTHCHECK --interval=5m --timeout=10s --start-period=60s --retries=3 \
-    CMD python -c "import rentbuster; print(rentbuster.__version__)" || exit 1
+HEALTHCHECK --interval=5m --timeout=10s --start-period=120s --retries=3 \
+    CMD test -f /tmp/rentbuster_last_run && test $(( $(date +%s) - $(cat /tmp/rentbuster_last_run) )) -lt 7200 || exit 1
 
 ENTRYPOINT ["python", "-m", "rentbuster"]
 CMD ["run"]

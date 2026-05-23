@@ -41,6 +41,9 @@ class SearchConfig:
     property_types: list[str] = field(default_factory=lambda: ["apartment", "studio"])
     pararius_max_pages: int = 5
     rentbuster_nl_max_pages: int = 10
+    must_allow_students: bool = False
+    must_allow_sharing: bool = False
+    must_accept_guarantor: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SearchConfig:
@@ -52,6 +55,9 @@ class SearchConfig:
             property_types=list(data.get("property_types") or ["apartment", "studio"]),
             pararius_max_pages=int(data.get("pararius_max_pages", 5)),
             rentbuster_nl_max_pages=int(data.get("rentbuster_nl_max_pages", 10)),
+            must_allow_students=bool(data.get("must_allow_students", False)),
+            must_allow_sharing=bool(data.get("must_allow_sharing", False)),
+            must_accept_guarantor=bool(data.get("must_accept_guarantor", False)),
         )
 
 

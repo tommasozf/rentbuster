@@ -48,6 +48,11 @@ CREATE TABLE IF NOT EXISTS listings (
     woz_reference_date       TEXT,
     woz_verified             BOOLEAN DEFAULT FALSE,
 
+    -- Tenant suitability
+    suitable_for_students    BOOLEAN,
+    suitable_for_sharing     BOOLEAN,
+    guarantor_accepted       BOOLEAN,
+
     -- Rent-buster.nl cross-reference
     rb_estimated_max_rent    REAL,
     rb_savings               REAL,
@@ -98,6 +103,16 @@ CREATE TABLE IF NOT EXISTS telegram_subscribers (
     username      TEXT,
     first_name    TEXT,
     subscribed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ── Dropped listings (per-subscriber hide list) ─────────────────────
+
+CREATE TABLE IF NOT EXISTS dropped_listings (
+    chat_id    BIGINT NOT NULL,
+    source     TEXT NOT NULL,
+    source_id  TEXT NOT NULL,
+    dropped_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (chat_id, source, source_id)
 );
 
 -- ── Scraper run log ──────────────────────────────────────────────────

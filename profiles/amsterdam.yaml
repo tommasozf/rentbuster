@@ -8,6 +8,9 @@ search:
   property_types: [apartment, studio]
   pararius_max_pages: 15
   rentbuster_nl_max_pages: 23
+  must_allow_students: true
+  must_allow_sharing: true
+  must_accept_guarantor: true
 wws:
   bustable_only: true
   min_savings: 50

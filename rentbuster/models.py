@@ -100,6 +100,11 @@ class Listing:
     woz_reference_date: str | None = None
     woz_verified: bool = False
 
+    # Tenant suitability (from detail page or LLM)
+    suitable_for_students: bool | None = None
+    suitable_for_sharing: bool | None = None
+    guarantor_accepted: bool | None = None
+
     # Rent-buster.nl cross-ref
     rb_estimated_max_rent: float | None = None
     rb_savings: float | None = None
@@ -145,6 +150,9 @@ class Listing:
             "woz_value": self.woz_value,
             "woz_reference_date": self.woz_reference_date,
             "woz_verified": self.woz_verified,
+            "suitable_for_students": self.suitable_for_students,
+            "suitable_for_sharing": self.suitable_for_sharing,
+            "guarantor_accepted": self.guarantor_accepted,
             "rb_estimated_max_rent": self.rb_estimated_max_rent,
             "rb_savings": self.rb_savings,
             "rb_confidence": self.rb_confidence,
