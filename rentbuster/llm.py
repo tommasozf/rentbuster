@@ -185,10 +185,42 @@ def _parse_response(data: dict) -> LLMExtraction:
     )
 
 
+_DEFAULT_MODEL = "gemini-2.0-flash-lite"
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY = 30
+
+
+def _call_gemini(client, model: str, user_msg: str) -> dict | None:
+    from google.genai import types
+
+    for attempt in range(_MAX_RETRIES):
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=user_msg,
+                config=types.GenerateContentConfig(
+                    system_instruction=_SYSTEM_PROMPT,
+                    response_mime_type="application/json",
+                    response_schema=_RESPONSE_SCHEMA,
+                    temperature=0.0,
+                ),
+            )
+            return json.loads(response.text)
+        except Exception as exc:
+            exc_str = str(exc)
+            if "429" in exc_str or "RESOURCE_EXHAUSTED" in exc_str:
+                wait = _RETRY_BASE_DELAY * (2 ** attempt)
+                log.warning("llm: rate limited, waiting %ds (attempt %d/%d)", wait, attempt + 1, _MAX_RETRIES)
+                time.sleep(wait)
+                continue
+            raise
+    return None
+
+
 def extract_listing_features(
     listing: Listing,
     api_key: str,
-    model: str = "gemini-2.5-flash",
+    model: str = _DEFAULT_MODEL,
 ) -> LLMExtraction | None:
     if not listing.description and not listing.interior:
         log.debug("llm: skipping %s %s — no description", listing.street, listing.house_number)
@@ -196,7 +228,6 @@ def extract_listing_features(
 
     try:
         from google import genai
-        from google.genai import types
     except ImportError:
         log.error("llm: google-genai package not installed — run: uv add google-genai")
         return None
@@ -205,32 +236,18 @@ def extract_listing_features(
     user_msg = _build_user_message(listing)
 
     try:
-        response = client.models.generate_content(
-            model=model,
-            contents=user_msg,
-            config=types.GenerateContentConfig(
-                system_instruction=_SYSTEM_PROMPT,
-                response_mime_type="application/json",
-                response_schema=_RESPONSE_SCHEMA,
-                temperature=0.0,
-            ),
-        )
+        data = _call_gemini(client, model, user_msg)
+        if data:
+            return _parse_response(data)
     except Exception as exc:
         log.warning("llm: API call failed for %s %s: %s", listing.street, listing.house_number, exc)
-        return None
-
-    try:
-        data = json.loads(response.text)
-        return _parse_response(data)
-    except (json.JSONDecodeError, AttributeError) as exc:
-        log.warning("llm: failed to parse response for %s %s: %s", listing.street, listing.house_number, exc)
-        return None
+    return None
 
 
 def extract_batch(
     listings: list[Listing],
     api_key: str,
-    model: str = "gemini-2.5-flash",
+    model: str = _DEFAULT_MODEL,
 ) -> dict[str, LLMExtraction]:
     results: dict[str, LLMExtraction] = {}
     candidates = [l for l in listings if l.description or l.interior]
@@ -249,8 +266,8 @@ def extract_batch(
                 extraction.outdoor_points, extraction.kitchen_points,
                 extraction.bathroom_points, extraction.heating_points,
             )
-        # Gemini free tier: 10 RPM → stay under with ~7s between calls
+        # gemini-2.0-flash-lite free tier: 15 RPM, 1000 RPD → 5s between calls
         if i < len(candidates) - 1:
-            time.sleep(7)
+            time.sleep(5)
     log.info("llm: extracted features for %d/%d listings", len(results), len(candidates))
     return results

@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     # ── LLM feature extraction ──
     llm_enabled: bool = False
     gemini_api_key: str | None = None
-    llm_model: str = "gemini-2.5-flash"
+    llm_model: str = "gemini-2.0-flash-lite"
 
     # ── Scraper scheduling ──
     check_interval_min: int = 120
