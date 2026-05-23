@@ -185,7 +185,7 @@ def _parse_response(data: dict) -> LLMExtraction:
     )
 
 
-_DEFAULT_MODEL = "gemini-2.0-flash-lite"
+_DEFAULT_MODEL = "gemini-2.5-flash-lite"
 _MAX_RETRIES = 3
 _RETRY_BASE_DELAY = 30
 
@@ -266,8 +266,7 @@ def extract_batch(
                 extraction.outdoor_points, extraction.kitchen_points,
                 extraction.bathroom_points, extraction.heating_points,
             )
-        # gemini-2.0-flash-lite free tier: 15 RPM, 1000 RPD → 5s between calls
         if i < len(candidates) - 1:
-            time.sleep(5)
+            time.sleep(0.2)
     log.info("llm: extracted features for %d/%d listings", len(results), len(candidates))
     return results
