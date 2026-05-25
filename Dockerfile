@@ -36,12 +36,12 @@ COPY schema.sql ./
 
 RUN uv sync --frozen --no-dev --extra llm
 
-# Install Playwright Chromium browser
-RUN /app/.venv/bin/playwright install chromium
-
 RUN useradd --create-home --uid 1000 rentbuster \
     && chown -R rentbuster:rentbuster /app
 USER rentbuster
+
+# Install Playwright Chromium browser (must run as rentbuster user)
+RUN playwright install chromium
 
 HEALTHCHECK --interval=5m --timeout=10s --start-period=120s --retries=3 \
     CMD test -f /tmp/rentbuster_last_run && test $(( $(date +%s) - $(cat /tmp/rentbuster_last_run) )) -lt 7200 || exit 1
