@@ -103,14 +103,30 @@ You extract property features from Dutch rental listing descriptions for the WWS
 The listing may be in Dutch or English.
 
 IMPORTANT RULES:
-- Be CONSERVATIVE. When uncertain, choose lower/fewer points. Under-counting is safer \
-than over-counting because it makes the listing more likely to be flagged as overpriced.
 - Only report what is explicitly mentioned or strongly implied. Do not guess.
 - "Gemeubileerd"/"furnished" does NOT imply kitchen appliances are built-in fixtures.
 - A "kitchen" with no further detail = "minimal".
-- If outdoor space is mentioned without size, estimate conservatively.
-- For tenant suitability fields, only set true/false if EXPLICITLY stated; otherwise null.
-- Dutch terms: balkon = balcony, dakterras = roof terrace, tuin = garden, \
+
+OUTDOOR SPACE — pay close attention:
+- Any mention of balkon/balcony, dakterras/roof terrace, tuin/garden, terras/terrace, \
+loggia, patio, or Frans balkon means has_private_outdoor = true (unless explicitly shared).
+- Check the full description carefully — outdoor spaces are often mentioned briefly.
+- If outdoor space is mentioned without size, estimate conservatively: \
+'small balcony'/'Frans balkon' = 3, 'balcony'/'balkon' = 5, 'large balcony' = 8, \
+'terrace'/'terras' = 10, 'large terrace'/'dakterras' = 15, 'garden'/'tuin' = 15.
+
+TENANT SUITABILITY — set to false when the listing restricts:
+- suitable_for_students: false if "not suitable for students", "no students", \
+"geen studenten", or similar restriction. true if students are welcome. null if not mentioned.
+- suitable_for_sharing: false if "no sharers", "no sharing", "not suitable for sharing", \
+"geen medehuurders", "niet geschikt voor samenwonen", "single occupancy", \
+"alleen bewoning", or similar restriction. true if sharing is allowed. null if not mentioned.
+- guarantor_accepted: false if "no guarantor", "geen borg". true if accepted. null if not mentioned.
+
+For all other features, be CONSERVATIVE. Under-counting is safer \
+than over-counting because it makes the listing more likely to be flagged as overpriced.
+
+Dutch terms: balkon = balcony, dakterras = roof terrace, tuin = garden, \
 terras = terrace, loggia = loggia, vloerverwarming = floor heating, \
 CV-ketel = central heating, stadsverwarming = district heating, \
 vaatwasser = dishwasher, oven, koelkast = fridge, magnetron = microwave, \
@@ -185,7 +201,7 @@ def _build_user_message(listing: Listing) -> str:
     parts.append("=== LISTING DESCRIPTION ===")
     desc = (listing.description or "").strip()
     if desc:
-        parts.append(desc[:3000])
+        parts.append(desc[:5000])
     else:
         parts.append("(no description available)")
     return "\n".join(parts)

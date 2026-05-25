@@ -23,15 +23,16 @@ log = logging.getLogger(__name__)
 _PDOK_URL = "https://api.pdok.nl/bzk/locatieserver/search/v3_1/free"
 _WOZ_URL = "https://api.kadaster.nl/lvwoz/wozwaardeloket-api/v1/wozwaarde/nummeraanduiding"
 
-# Conservative WOZ estimates per m² when lookup fails, by city (intentionally low)
+# Conservative WOZ estimates per m² when lookup fails, by city.
+# Based on 2025/2026 municipal WOZ averages — still conservative vs. market.
 WOZ_ESTIMATE_PER_M2: dict[str, int] = {
-    "amsterdam": 3000,
-    "rotterdam": 2000,
-    "den haag": 2200,
-    "the hague": 2200,
-    "utrecht": 2500,
+    "amsterdam": 6000,
+    "rotterdam": 3500,
+    "den haag": 3800,
+    "the hague": 3800,
+    "utrecht": 4500,
 }
-WOZ_ESTIMATE_DEFAULT = 2000
+WOZ_ESTIMATE_DEFAULT = 3500
 
 
 @dataclass
@@ -42,20 +43,12 @@ class WOZResult:
     source: str  # "kadaster" or "estimated"
 
 
-def _pdok_nummeraanduiding(
-    postal_code: str,
-    house_number: str,
-    addition: str,
-    session: requests.Session,
-) -> str | None:
-    """Resolve a Dutch address to a BAG nummeraanduiding_id via PDOK locatieserver."""
-    q = f"{postal_code.replace(' ', '')} {house_number}"
-    if addition:
-        q += f" {addition}"
+def _pdok_search(query: str, session: requests.Session) -> str | None:
+    """Search PDOK locatieserver and return the nummeraanduiding_id of the top result."""
     try:
         resp = session.get(
             _PDOK_URL,
-            params={"q": q, "fq": "type:adres", "rows": "1"},
+            params={"q": query, "fq": "type:adres", "rows": "1"},
             headers={"Accept": "application/json"},
             timeout=8,
         )
@@ -64,7 +57,39 @@ def _pdok_nummeraanduiding(
         if docs:
             return str(docs[0].get("nummeraanduiding_id") or "")
     except Exception as exc:
-        log.debug("pdok lookup failed for %s %s: %s", postal_code, house_number, exc)
+        log.debug("pdok lookup failed for %r: %s", query, exc)
+    return None
+
+
+def _pdok_nummeraanduiding(
+    postal_code: str,
+    house_number: str,
+    addition: str,
+    session: requests.Session,
+    street: str = "",
+    city: str = "",
+) -> str | None:
+    """Resolve a Dutch address to a BAG nummeraanduiding_id via PDOK locatieserver."""
+    # Try postal code + house number first (most precise)
+    if postal_code:
+        q = f"{postal_code.replace(' ', '')} {house_number}"
+        if addition:
+            q += f" {addition}"
+        nid = _pdok_search(q, session)
+        if nid:
+            return nid
+
+    # Fallback: street + house number + city (when postal code is missing)
+    if street and city:
+        q = f"{street} {house_number}"
+        if addition:
+            q += f" {addition}"
+        q += f" {city}"
+        nid = _pdok_search(q, session)
+        if nid:
+            log.debug("pdok: resolved via street+city for %s %s %s", street, house_number, city)
+            return nid
+
     return None
 
 
@@ -112,11 +137,15 @@ def lookup_woz_kadaster(
     house_number: str,
     addition: str,
     session: requests.Session | None = None,
+    street: str = "",
+    city: str = "",
 ) -> WOZResult | None:
     """Lookup WOZ value via PDOK geocoding + Kadaster LV-WOZ API. No API key needed."""
     _session = session or requests.Session()
 
-    nid = _pdok_nummeraanduiding(postal_code, house_number, addition, _session)
+    nid = _pdok_nummeraanduiding(
+        postal_code, house_number, addition, _session, street=street, city=city
+    )
     if nid:
         result = _fetch_woz_for_nid(nid, _session)
         if result:
@@ -125,7 +154,9 @@ def lookup_woz_kadaster(
     # If exact match failed and there's an addition, retry without it (sibling unit)
     if addition:
         log.debug("woz: retrying without addition for %s %s", postal_code, house_number)
-        nid_sibling = _pdok_nummeraanduiding(postal_code, house_number, "", _session)
+        nid_sibling = _pdok_nummeraanduiding(
+            postal_code, house_number, "", _session, street=street, city=city
+        )
         if nid_sibling and nid_sibling != (nid or ""):
             result = _fetch_woz_for_nid(nid_sibling, _session)
             if result:
@@ -180,12 +211,14 @@ def lookup_woz(listing: Listing) -> WOZResult:
 
     result: WOZResult | None = None
 
-    if listing.postal_code and listing.house_number:
+    if listing.house_number and (listing.postal_code or (listing.street and listing.city)):
         result = lookup_woz_kadaster(
             postal_code=listing.postal_code,
             house_number=listing.house_number,
             addition=listing.house_number_addition,
             session=_get_session(),
+            street=listing.street,
+            city=listing.city,
         )
 
     if result is None:

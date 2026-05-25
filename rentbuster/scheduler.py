@@ -127,6 +127,15 @@ class RentBuster:
                 if listing.guarantor_accepted is None:
                     listing.guarantor_accepted = ext.guarantor_accepted
 
+        # 6c. Re-apply suitability filters now that LLM has filled in missing fields
+        before_refilter = len(new_listings)
+        new_listings = self._apply_search_filters(new_listings)
+        if len(new_listings) < before_refilter:
+            log.info(
+                "post-LLM suitability filter removed %d listings",
+                before_refilter - len(new_listings),
+            )
+
         # 7. Calculate WWS points
         for listing in new_listings:
             key = f"{listing.source.value}:{listing.source_id}"
