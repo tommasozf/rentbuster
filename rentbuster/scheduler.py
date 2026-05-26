@@ -94,6 +94,11 @@ class RentBuster:
 
         if not new_listings:
             if self.db and not self.dry_run:
+                by_source: dict[str, list[str]] = {}
+                for ls in deduped:
+                    by_source.setdefault(ls.source.value, []).append(ls.source_id)
+                for src, ids in by_source.items():
+                    self.db.touch_listings(src, ids)
                 self.db.mark_disappeared()
             return
 
@@ -153,10 +158,11 @@ class RentBuster:
         if self.db and not self.dry_run:
             for listing in new_listings:
                 self.db.upsert_listing(listing)
-            self.db.touch_listings(
-                "all",
-                [ls.source_id for ls in deduped],
-            )
+            by_source: dict[str, list[str]] = {}
+            for ls in deduped:
+                by_source.setdefault(ls.source.value, []).append(ls.source_id)
+            for src, ids in by_source.items():
+                self.db.touch_listings(src, ids)
 
         # 8. Filter bustable listings
         bustable = [

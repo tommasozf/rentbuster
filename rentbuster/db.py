@@ -252,7 +252,7 @@ class Database:
             with self._cursor() as cur:
                 cur.execute(
                     """
-                    SELECT source, source_id, url, street, house_number, house_number_addition,
+                    SELECT id, source, source_id, url, street, house_number, house_number_addition,
                            postal_code, city, asking_rent, surface_area_m2, num_rooms,
                            energy_label, wws_points, wws_max_rent, wws_savings, wws_confidence,
                            woz_value, woz_verified, bust_score, first_seen_at, available_from
