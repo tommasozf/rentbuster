@@ -43,6 +43,8 @@ class ConfidenceLevel(str, Enum):
 class Source(str, Enum):
     PARARIUS = "pararius"
     RENTBUSTER_NL = "rentbuster_nl"
+    FUNDA = "funda"
+    KAMERNET = "kamernet"
 
 
 def normalize_address(street: str, house_number: str, addition: str) -> str:

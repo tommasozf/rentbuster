@@ -76,6 +76,12 @@ def _item_to_listing(item: dict[str, Any]) -> Listing | None:
     if not prop_id:
         return None
 
+    source = Source.RENTBUSTER_NL
+    if "funda.nl" in full_url:
+        source = Source.FUNDA
+    elif "kamernet.nl" in full_url:
+        source = Source.KAMERNET
+
     address_raw = str(item.get("address") or "")
     street, house_number, addition, postal_code = _parse_address(address_raw)
 
@@ -134,7 +140,7 @@ def _item_to_listing(item: dict[str, Any]) -> Listing | None:
         images = [img]
 
     return Listing(
-        source=Source.RENTBUSTER_NL,
+        source=source,
         source_id=prop_id,
         url=full_url,
         street=street,

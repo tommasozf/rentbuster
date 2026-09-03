@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     pararius_max_pages: int = 5
     rentbuster_nl_enabled: bool = True
     rentbuster_nl_max_pages: int = 10
+    funda_enabled: bool = True
     playwright_headless: bool = True
     fetch_details: bool = True
     detail_fetch_delay: float = 2.0

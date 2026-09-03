@@ -4,12 +4,27 @@ from __future__ import annotations
 
 from rentbuster.models import Listing, Source
 
+# Source priority for deduplication (higher index = higher priority).
+# Pararius has the richest detail pages and wins over all others.
+# Funda and Kamernet are original source listings surfaced via rent-buster.nl.
+_SOURCE_PRIORITY: dict[Source, int] = {
+    Source.RENTBUSTER_NL: 0,
+    Source.KAMERNET: 1,
+    Source.FUNDA: 2,
+    Source.PARARIUS: 3,
+}
+
+
+def _priority(source: Source) -> int:
+    return _SOURCE_PRIORITY.get(source, 0)
+
 
 def deduplicate(listings: list[Listing]) -> list[Listing]:
     """Group listings by normalised address and merge duplicates.
 
-    When the same address appears across sources, prefer the Pararius listing
-    (richer detail) and merge rent-buster.nl cross-reference data into it.
+    When the same address appears across sources, prefer the higher-priority
+    listing (Pararius > Funda > Kamernet > rentbuster_nl) and merge
+    rent-buster.nl cross-reference data into it where available.
     For same-source duplicates, keep the first occurrence.
     """
     seen: dict[str, Listing] = {}
@@ -22,14 +37,16 @@ def deduplicate(listings: list[Listing]) -> list[Listing]:
             result.append(listing)
         else:
             existing = seen[key]
-            # If incoming is Pararius and existing is not, swap (Pararius has more detail)
-            if listing.source == Source.PARARIUS and existing.source != Source.PARARIUS:
-                # Merge rentbuster_nl fields into the incoming Pararius listing
+            incoming_priority = _priority(listing.source)
+            existing_priority = _priority(existing.source)
+
+            if incoming_priority > existing_priority:
+                # Incoming has higher priority — promote it and carry rb fields
                 _merge_rb_fields(listing, existing)
                 seen[key] = listing
                 result[result.index(existing)] = listing
-            elif listing.source == Source.RENTBUSTER_NL and existing.source == Source.PARARIUS:
-                # Enrich existing Pararius listing with rentbuster_nl data
+            elif incoming_priority < existing_priority:
+                # Existing has higher priority — enrich it with rb cross-ref data
                 _merge_rb_fields(existing, listing)
             else:
                 # Same source duplicate — fill any missing fields from the duplicate
