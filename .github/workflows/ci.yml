@@ -23,8 +23,8 @@ jobs:
       - name: Install deps
         run: uv sync --frozen --extra dev --python ${{ matrix.python-version }}
       - name: Ruff lint
-        run: uv run ruff check rentbuster tests
+        run: uv run --python ${{ matrix.python-version }} ruff check rentbuster tests
       - name: Ruff format check
-        run: uv run ruff format --check rentbuster tests
+        run: uv run --python ${{ matrix.python-version }} ruff format --check rentbuster tests
       - name: Tests
-        run: uv run pytest -q
+        run: uv run --python ${{ matrix.python-version }} pytest -q
