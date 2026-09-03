@@ -143,9 +143,7 @@ def lookup_woz_kadaster(
     """Lookup WOZ value via PDOK geocoding + Kadaster LV-WOZ API. No API key needed."""
     _session = session or requests.Session()
 
-    nid = _pdok_nummeraanduiding(
-        postal_code, house_number, addition, _session, street=street, city=city
-    )
+    nid = _pdok_nummeraanduiding(postal_code, house_number, addition, _session, street=street, city=city)
     if nid:
         result = _fetch_woz_for_nid(nid, _session)
         if result:
