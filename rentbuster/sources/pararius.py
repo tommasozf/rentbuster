@@ -167,7 +167,7 @@ class ParariusSource:
 
     _UA = (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        "(KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
     )
 
     async def _ensure_browser(self):
@@ -177,7 +177,14 @@ class ParariusSource:
         from playwright_stealth import Stealth
 
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=self.headless)
+        self._browser = await self._playwright.chromium.launch(
+            headless=self.headless,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-features=IsolateOrigins,site-per-process",
+                "--disable-site-isolation-trials",
+            ],
+        )
         self._stealth = Stealth()
         log.debug("pararius: browser launched")
 
@@ -189,7 +196,11 @@ class ParariusSource:
         await self._ensure_browser()
         ctx = await self._browser.new_context(
             user_agent=self._UA,
-            viewport={"width": 1280, "height": 800},
+            viewport={"width": 1920, "height": 1080},
+            locale="nl-NL",
+            timezone_id="Europe/Amsterdam",
+            geolocation={"latitude": 52.3676, "longitude": 4.9041},
+            permissions=["geolocation"],
         )
         page = await ctx.new_page()
         await self._stealth.apply_stealth_async(page)
@@ -197,6 +208,13 @@ class ParariusSource:
         try:
             await page.goto(url, wait_until="domcontentloaded")
             await asyncio.sleep(3)
+            for _ in range(10):
+                title = await page.title()
+                if "just a moment" in title.lower() or "cloudflare" in title.lower():
+                    log.debug("pararius: waiting for Cloudflare challenge...")
+                    await asyncio.sleep(3)
+                else:
+                    break
         except Exception as exc:
             log.warning("pararius: page load issue for %s: %s", url, exc)
         return ctx, page
@@ -215,6 +233,18 @@ class ParariusSource:
                     page_listings = await self._parse_listing_cards(page)
                 finally:
                     await ctx.close()
+
+                if not page_listings and page_num == 1:
+                    log.info("pararius: no cards on page %d, retrying after delay...", page_num)
+                    await asyncio.sleep(random.uniform(5.0, 10.0))
+                    try:
+                        ctx2, page2 = await self._fresh_page(url)
+                        try:
+                            page_listings = await self._parse_listing_cards(page2)
+                        finally:
+                            await ctx2.close()
+                    except Exception as exc:
+                        log.warning("pararius: retry also failed for page %d: %s", page_num, exc)
             except Exception as exc:
                 log.error("pararius: error on page %d: %s", page_num, exc)
                 break
