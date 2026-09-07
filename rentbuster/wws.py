@@ -1,16 +1,18 @@
 """WWS (Woningwaarderingsstelsel) points calculator for zelfstandige woonruimte.
 
-Implements the 2024/2025 Dutch social housing points system. Targets meergezinswoningen
+Implements the Dutch WWS points system (Huurcommissie policy book, 1 January 2026). Targets meergezinswoningen
 (apartments) in Amsterdam.
 
-IMPORTANT: The rent table (POINTS_TO_MAX_RENT_TABLE) is derived via linear interpolation
-between known anchor points and MUST be verified against the official Bijlage 3 publication:
-https://www.huurcommissie.nl/onderwerpen/wws
+The points-to-rent table (Bijlage 3) lives in rentbuster/data/huurprijsgrenzen.json and is
+republished by the Huurcommissie every 1 January.
 """
 
 from __future__ import annotations
 
+import json
+import math
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rentbuster.models import ConfidenceLevel, Listing
@@ -49,73 +51,43 @@ DEFAULT_KITCHEN_POINTS = 4.0  # minimal kitchen
 DEFAULT_BATHROOM_POINTS = 3.0  # minimal bathroom
 DEFAULT_HEATING_POINTS = 2.0  # basic heating
 
-# Bijlage 3 — rent table anchor points (Huurcommissie 2025).
-# Linear interpolation used between these anchors; extrapolated above 187 pts.
-# VERIFY these values against the official 2025 publication before use in production.
-_RENT_TABLE_ANCHORS: list[tuple[int, float]] = [
-    (40, 303.62),
-    (50, 342.83),
-    (60, 382.04),
-    (70, 421.37),
-    (80, 460.69),
-    (90, 499.90),
-    (100, 539.23),
-    (110, 578.54),
-    (120, 617.86),
-    (130, 657.07),
-    (140, 718.88),
-    (145, 739.55),
-    (150, 761.34),
-    (155, 785.00),
-    (160, 808.06),
-    (165, 829.30),
-    (170, 849.62),
-    (175, 862.68),
-    (180, 871.74),
-    (185, 876.65),
-    (186, 878.16),
-    (187, 879.66),
-]
+# Bijlage 3 — maximale huurprijsgrenzen (Huurcommissie), loaded from rentbuster/data/huurprijsgrenzen.json.
+# The table is republished every 1 January; see the JSON file for the source URL and valid_from date.
+_TABLE_PATH = Path(__file__).resolve().parent / "data" / "huurprijsgrenzen.json"
 
 
-def _build_rent_table() -> dict[int, float]:
-    """Interpolate between anchor points to build a per-integer-point lookup table."""
-    table: dict[int, float] = {}
-    anchors = sorted(_RENT_TABLE_ANCHORS)
-    for i in range(len(anchors) - 1):
-        p0, r0 = anchors[i]
-        p1, r1 = anchors[i + 1]
-        for pts in range(p0, p1):
-            frac = (pts - p0) / (p1 - p0)
-            table[pts] = round(r0 + frac * (r1 - r0), 2)
-    # Include the final anchor
-    table[anchors[-1][0]] = anchors[-1][1]
-    return table
+def _load_rent_table() -> tuple[dict[int, float], str]:
+    with _TABLE_PATH.open(encoding="utf-8") as f:
+        data = json.load(f)
+    table = {int(k): float(v) for k, v in data["max_rent_by_points"].items()}
+    return table, data["valid_from"]
 
 
-_RENT_TABLE = _build_rent_table()
-_EXTRAPOLATE_RATE = 5.87  # EUR/point above liberalization threshold
+_RENT_TABLE, RENT_TABLE_VALID_FROM = _load_rent_table()
+_RENT_TABLE_MIN = min(_RENT_TABLE)
+_RENT_TABLE_MAX = max(_RENT_TABLE)
+# Per-point step used above the last row of the table (only free-market homes get there).
+_RENT_TABLE_STEP = _RENT_TABLE[_RENT_TABLE_MAX] - _RENT_TABLE[_RENT_TABLE_MAX - 1]
+
+
+def round_points(points: float) -> int:
+    """Round a WWS total to whole points the way the Huurcommissie does (half rounds up)."""
+    return int(math.floor(points + 0.5))
 
 
 def points_to_max_rent(points: float) -> float:
-    """Return the maximum legal monthly rent for a given WWS point total.
+    """Return the maximum legal monthly rent for a WWS point total.
 
-    For points >= LIBERALIZATION_THRESHOLD the apartment is free-market, but we still
-    return the extrapolated value so callers can reason about it.
+    Points are rounded to whole points first, then looked up in Bijlage 3. Below the first
+    row the first row applies; above the last row the value is extrapolated (those homes are
+    free-market anyway, the number is only there for ranking).
     """
-    pts_int = int(points)
-    if pts_int < 40:
-        # Below minimum table entry — use anchor value
-        return _RENT_TABLE.get(40, 303.62)
-    if pts_int in _RENT_TABLE:
-        # Interpolate fractional points between this and next entry
-        base = _RENT_TABLE[pts_int]
-        if points > pts_int and (pts_int + 1) in _RENT_TABLE:
-            frac = points - pts_int
-            base += frac * (_RENT_TABLE[pts_int + 1] - base)
-        return round(base, 2)
-    # Extrapolate above table
-    return round(_RENT_TABLE.get(187, 879.66) + (points - 187) * _EXTRAPOLATE_RATE, 2)
+    pts = round_points(points)
+    if pts <= _RENT_TABLE_MIN:
+        return _RENT_TABLE[_RENT_TABLE_MIN]
+    if pts in _RENT_TABLE:
+        return _RENT_TABLE[pts]
+    return round(_RENT_TABLE[_RENT_TABLE_MAX] + (pts - _RENT_TABLE_MAX) * _RENT_TABLE_STEP, 2)
 
 
 # ── Breakdown dataclass ────────────────────────────────────────────────────────

@@ -8,26 +8,32 @@ from rentbuster.wws import (
     LIBERALIZATION_THRESHOLD,
     calculate_wws,
     points_to_max_rent,
+    round_points,
 )
 
 
 class TestPointsToMaxRent:
     def test_below_minimum(self):
-        # Below table minimum — should return lowest table entry
-        assert points_to_max_rent(30) > 0
+        # Below the first table row (40 pts) the 40-point rent applies
+        assert points_to_max_rent(30) == points_to_max_rent(40) == 250.26
 
-    def test_at_liberalization(self):
-        rent = points_to_max_rent(LIBERALIZATION_THRESHOLD)
-        # Should be around €879-880 for 2025 table
-        assert 850 < rent < 920
+    def test_official_2026_values(self):
+        # Huurcommissie Bijlage 3 per 1 January 2026
+        assert points_to_max_rent(143) == 932.93  # social-sector boundary
+        assert points_to_max_rent(186) == 1228.07  # top of the regulated (middenhuur) segment
+        assert points_to_max_rent(187) == 1234.92  # first free-market row
+        assert points_to_max_rent(250) == 1667.40  # last row
 
-    def test_above_liberalization_extrapolates(self):
-        rent_at_187 = points_to_max_rent(187)
-        rent_at_197 = points_to_max_rent(197)
-        assert rent_at_197 > rent_at_187
+    def test_rounds_to_whole_points_half_up(self):
+        assert points_to_max_rent(150.4) == points_to_max_rent(150)
+        assert points_to_max_rent(150.5) == points_to_max_rent(151)
+        assert round_points(186.5) == 187
+
+    def test_above_table_extrapolates(self):
+        assert points_to_max_rent(260) > points_to_max_rent(250)
 
     def test_monotonically_increasing(self):
-        rents = [points_to_max_rent(p) for p in range(40, 190)]
+        rents = [points_to_max_rent(p) for p in range(40, 260)]
         for i in range(1, len(rents)):
             assert rents[i] >= rents[i - 1], f"not monotone at {i + 40} pts"
 
