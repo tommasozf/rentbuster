@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
-import re  # used in normalize_address
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+from rentbuster.address import normalize_address  # noqa: F401  (re-exported; used by address_key)
 
 
 class EnergyLabel(str, Enum):
@@ -45,19 +46,6 @@ class Source(str, Enum):
     RENTBUSTER_NL = "rentbuster_nl"
     FUNDA = "funda"
     KAMERNET = "kamernet"
-
-
-def normalize_address(street: str, house_number: str, addition: str) -> str:
-    """Return a normalised 'street|number|addition' key for deduplication.
-
-    Strips trailing periods (common abbreviation marker), normalizes whitespace and case.
-    Scrapers return full street names so heavy abbreviation expansion is not needed.
-    """
-    s = street.lower().strip().rstrip(".")
-    s = re.sub(r"\s+", " ", s).strip()
-    num = str(house_number).strip().lower()
-    add = (addition or "").lower().strip()
-    return f"{s}|{num}|{add}"
 
 
 @dataclass
@@ -117,7 +105,7 @@ class Listing:
 
     @property
     def address_key(self) -> str:
-        return normalize_address(self.street, self.house_number, self.house_number_addition)
+        return normalize_address(self.street, self.house_number, self.house_number_addition, self.postal_code)
 
     def to_db_params(self) -> dict:
         return {

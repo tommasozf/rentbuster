@@ -20,6 +20,7 @@ from typing import Any
 
 import requests
 
+from rentbuster.address import split_street_number
 from rentbuster.models import EnergyLabel, Listing, Source
 
 log = logging.getLogger(__name__)
@@ -31,8 +32,6 @@ _LISTINGS_PER_PAGE = 10
 _LISTING_RE = re.compile(r'\{"imageUrl":.*?"type":"[^"]+"\}')
 # Dutch postal code embedded in address string: "1068LD" or "1068 LD"
 _POSTAL_RE = re.compile(r"\b(\d{4})\s*([A-Z]{2})\b")
-# House number with optional letter/hyphen suffix: "21-F", "34C", "86"
-_ADDR_RE = re.compile(r"^(.+?)\s+(\d+[-–]?\d*[A-Za-z]?)\s*([A-Za-z0-9-]*)$")
 
 
 def _parse_address(address: str) -> tuple[str, str, str, str]:
@@ -51,22 +50,8 @@ def _parse_address(address: str) -> tuple[str, str, str, str]:
         if pc_m:
             postal_code = f"{pc_m.group(1)} {pc_m.group(2)}"
 
-    m = _ADDR_RE.match(street_part)
-    if m:
-        street = m.group(1).strip()
-        number_raw = m.group(2).strip()
-        addition_raw = m.group(3).strip()
-        # "21-F" → number="21", addition="F"
-        # "21-F" → number="21", addition="F" (letter-only suffix = addition)
-        hyp_letter = re.match(r"^(\d+)[-–]([A-Za-z])$", number_raw)
-        if hyp_letter and not addition_raw:
-            return street, hyp_letter.group(1), hyp_letter.group(2), postal_code
-        # "34C-22" → addition starts with "-", keep as part of number
-        if addition_raw.startswith(("-", "–")):
-            return street, number_raw + addition_raw, "", postal_code
-        return street, number_raw, addition_raw, postal_code
-
-    return street_part, "", "", postal_code
+    street, number, addition = split_street_number(street_part)
+    return street, number, addition, postal_code
 
 
 def _item_to_listing(item: dict[str, Any]) -> Listing | None:
