@@ -34,6 +34,48 @@ _POSTAL_RE = re.compile(r"\b(\d{4})\s*([A-Z]{2})\b")
 # House number with optional letter/hyphen suffix: "21-F", "34C", "86"
 _ADDR_RE = re.compile(r"^(.+?)\s+(\d+[-–]?\d*[A-Za-z]?)\s*([A-Za-z0-9-]*)$")
 
+# rent-buster.nl reports Dutch (and occasionally English) property types. Map them onto the
+# English values used in profiles (apartment / studio / room / house) so the filter works.
+_PROPERTY_TYPES: dict[str, str] = {
+    "appartement": "apartment",
+    "apartment": "apartment",
+    "penthouse": "apartment",
+    "maisonnette": "apartment",
+    "bovenwoning": "apartment",
+    "benedenwoning": "apartment",
+    "portiekwoning": "apartment",
+    "galerijflat": "apartment",
+    "flat": "apartment",
+    "studio": "studio",
+    "kamer": "room",
+    "room": "room",
+    "huis": "house",
+    "woonhuis": "house",
+    "eengezinswoning": "house",
+    "herenhuis": "house",
+    "hoekwoning": "house",
+    "tussenwoning": "house",
+    "villa": "house",
+}
+
+
+def normalize_property_type(raw: str | None) -> str:
+    """'Appartement' → 'apartment', 'Penthouse (appartement)' → 'apartment', 'Kamer' → 'room'.
+
+    Unknown values are returned lower-cased so they show up in logs instead of being silently
+    treated as apartments.
+    """
+    t = (raw or "").strip().lower()
+    if not t:
+        return "apartment"
+    if t in _PROPERTY_TYPES:
+        return _PROPERTY_TYPES[t]
+    for key, value in _PROPERTY_TYPES.items():
+        if key in t:
+            return value
+    log.debug("rent-buster.nl: unknown property type %r", raw)
+    return t
+
 
 def _parse_address(address: str) -> tuple[str, str, str, str]:
     """Parse 'Osdorper Ban 21-F, 1068LD Amsterdam' → (street, number, addition, postal_code).
@@ -132,7 +174,7 @@ def _item_to_listing(item: dict[str, Any]) -> Listing | None:
     furnished = item.get("furnished", False)
     interior = "furnished" if furnished else ""
 
-    prop_type = str(item.get("type") or "apartment").lower()
+    prop_type = normalize_property_type(str(item.get("type") or ""))
 
     images = []
     img = str(item.get("imageUrl") or "")
