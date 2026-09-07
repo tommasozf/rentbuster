@@ -65,14 +65,45 @@ class TestCalculateWWS:
             bd = calculate_wws(listing)
             assert bd.energy_label == expected_pts
 
-    def test_woz_capped_at_33_percent(self):
-        # Use a very high WOZ value to trigger the cap
-        listing = self._make_listing(woz_value=10_000_000, surface_area_m2=50)
+    def test_woz_cap_only_applies_from_187_points(self):
+        # 50 m², label C, WOZ €500k: WOZ alone would be ~29+37 = 66 pts, well over 33% of the
+        # total, but the home stays under 187 so the cap must NOT be applied.
+        listing = self._make_listing(woz_value=500_000, surface_area_m2=50)
         bd = calculate_wws(listing)
-        total = bd.total
-        if total > 0:
-            woz_pct = bd.woz_capped / total
-            assert woz_pct <= 0.334  # small float tolerance
+        assert bd.woz_capped == bd.woz_uncapped
+        assert bd.total < LIBERALIZATION_THRESHOLD
+        assert "woz_capped" not in listing.wws_flags
+
+    def test_woz_cap_floors_at_186_points(self):
+        # Huurcommissie example: 109 non-WOZ points and 109 WOZ points (218 total, free market).
+        # With the cap WOZ counts for at most 33%: 53.7 → 53, total 162, which becomes 186.
+        # 90 m² + label C (15) + defaults (-5 + 4 + 3 + 2) = 109 non-WOZ points, like the example.
+        listing = self._make_listing(woz_value=10_000_000, surface_area_m2=90)
+        bd = calculate_wws(listing)
+        non_woz = bd.surface_area + bd.energy_label + bd.outdoor_space + bd.kitchen + bd.bathroom + bd.heating
+        assert non_woz == 109
+        assert bd.woz_uncapped + non_woz >= LIBERALIZATION_THRESHOLD
+        assert bd.woz_capped == 53
+        assert bd.total == 186
+        assert "woz_capped" in listing.wws_flags
+        assert "woz_cap_floor_186" in listing.wws_flags
+        assert listing.wws_points == 186
+        assert listing.wws_max_rent == points_to_max_rent(186)
+
+    def test_woz_cap_no_floor_for_small_newbuild(self):
+        listing = self._make_listing(
+            woz_value=10_000_000, surface_area_m2=35, construction_year=2020, city="amsterdam"
+        )
+        bd = calculate_wws(listing)
+        assert "woz_cap_newbuild_exception" in listing.wws_flags
+        assert bd.woz_cap_floor == 0
+        assert bd.total < LIBERALIZATION_THRESHOLD
+
+    def test_minimum_woz_value(self):
+        listing = self._make_listing(woz_value=50_000)
+        bd = calculate_wws(listing)
+        assert "woz_minimum_applied" in listing.wws_flags
+        assert bd.woz_uncapped == round(85_806 / 16_954 + (85_806 / 50) / 268, 2)
 
     def test_unknown_energy_label_defaults_to_d(self):
         listing = self._make_listing(energy_label=None)

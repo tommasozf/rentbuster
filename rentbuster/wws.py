@@ -40,10 +40,17 @@ ENERGY_POINTS_APARTMENT: dict[str, float] = {
     "G": -15.0,
 }
 
-# Two-part WOZ formula divisors (Bijlage 1, 2025)
-WOZ_DIVISOR_PART1 = 16_954
-WOZ_DIVISOR_PART2 = 268
-WOZ_MAX_PERCENTAGE = 0.33  # WOZ points cannot exceed 33% of total
+# WOZ points (rubriek 11), amounts valid per 1 January 2026 (waardepeildatum 1 January 2025)
+WOZ_DIVISOR_PART1 = 16_954  # 1 point per €16,954 of WOZ value
+WOZ_DIVISOR_PART2 = 268  # 1 point per €268 of WOZ value per m²
+WOZ_MINIMUM_VALUE = 85_806  # WOZ values below this are raised to it
+# The "cap op de WOZ": WOZ may make up at most 33% of the total, but only for homes that
+# reach 187 points without the cap. If the cap then drags such a home under 187, it is
+# valued at 186 points. Small new-builds (< 40 m², Amsterdam/Utrecht, delivered 2018-2022)
+# are exempt from that floor.
+WOZ_MAX_PERCENTAGE = 0.33
+WOZ_CAP_FLOOR_POINTS = 186
+_NEWBUILD_EXCEPTION_CITIES = {"amsterdam", "utrecht"}
 
 # Conservative defaults when detail data is missing (intentionally low = more likely flagged)
 DEFAULT_OUTDOOR_POINTS = -5.0  # no outdoor space known
@@ -99,6 +106,7 @@ class WWSBreakdown:
     energy_label: float = 0.0
     woz_uncapped: float = 0.0
     woz_capped: float = 0.0
+    woz_cap_floor: float = 0.0  # points added to reach 186 when the cap pushed a home under 187
     outdoor_space: float = 0.0
     kitchen: float = 0.0
     bathroom: float = 0.0
@@ -111,6 +119,7 @@ class WWSBreakdown:
             self.surface_area
             + self.energy_label
             + self.woz_capped
+            + self.woz_cap_floor
             + self.outdoor_space
             + self.kitchen
             + self.bathroom
@@ -123,6 +132,7 @@ class WWSBreakdown:
             "energy_label": self.energy_label,
             "woz_uncapped": self.woz_uncapped,
             "woz_capped": self.woz_capped,
+            "woz_cap_floor": self.woz_cap_floor,
             "outdoor_space": self.outdoor_space,
             "kitchen": self.kitchen,
             "bathroom": self.bathroom,
@@ -132,6 +142,16 @@ class WWSBreakdown:
 
 
 # ── Calculator ─────────────────────────────────────────────────────────────────
+
+
+def _is_small_newbuild_exception(listing: Listing) -> bool:
+    """Small new-build (< 40 m², delivered 2018-2022, COROP Amsterdam/Utrecht): no 186 floor."""
+    return (
+        0 < (listing.surface_area_m2 or 0) < 40
+        and listing.construction_year is not None
+        and 2018 <= listing.construction_year <= 2022
+        and (listing.city or "").lower().strip() in _NEWBUILD_EXCEPTION_CITIES
+    )
 
 
 def calculate_wws(listing: Listing, llm_extraction: LLMExtraction | None = None) -> WWSBreakdown:
@@ -157,7 +177,7 @@ def calculate_wws(listing: Listing, llm_extraction: LLMExtraction | None = None)
         bd.energy_label = ENERGY_POINTS_APARTMENT["D"]
         flags.append("energy_label_unknown_assumed_D")
 
-    # 3. WOZ value — two-part formula with 33% cap
+    # 3. WOZ value — two-part formula (the cap is applied after the other components are known)
     city_key = (listing.city or "").lower().strip()
     woz_source = getattr(listing, "_woz_source", None)
     if listing.woz_value and listing.woz_value > 0:
@@ -171,6 +191,10 @@ def calculate_wws(listing: Listing, llm_extraction: LLMExtraction | None = None)
         per_m2 = WOZ_ESTIMATE_PER_M2.get(city_key, WOZ_ESTIMATE_DEFAULT)
         woz = m2 * per_m2
         flags.append("woz_estimated_conservative")
+
+    if woz < WOZ_MINIMUM_VALUE:
+        woz = WOZ_MINIMUM_VALUE
+        flags.append("woz_minimum_applied")
 
     m2 = listing.surface_area_m2 or 50
     part_i = woz / WOZ_DIVISOR_PART1
@@ -195,12 +219,26 @@ def calculate_wws(listing: Listing, llm_extraction: LLMExtraction | None = None)
         bd.heating = DEFAULT_HEATING_POINTS
         flags.append("heating_assumed_basic")
 
-    # 33% cap: WOZ points cannot exceed 33% of total
+    # WOZ cap: only for homes that reach 187 points without it. Capped WOZ points are rounded
+    # down to whole points. If the cap drags the home under 187 it is valued at 186 points,
+    # unless it is a small 2018-2022 new-build in Amsterdam/Utrecht.
     subtotal_without_woz = (
         bd.surface_area + bd.energy_label + bd.outdoor_space + bd.kitchen + bd.bathroom + bd.heating
     )
-    max_woz = (WOZ_MAX_PERCENTAGE / (1 - WOZ_MAX_PERCENTAGE)) * subtotal_without_woz
-    bd.woz_capped = round(min(woz_uncapped, max_woz), 2)
+    uncapped_total = subtotal_without_woz + woz_uncapped
+    bd.woz_capped = bd.woz_uncapped
+    if uncapped_total >= LIBERALIZATION_THRESHOLD:
+        max_woz = (WOZ_MAX_PERCENTAGE / (1 - WOZ_MAX_PERCENTAGE)) * subtotal_without_woz
+        if woz_uncapped > max_woz:
+            bd.woz_capped = float(math.floor(max_woz))
+            flags.append("woz_capped")
+            capped_total = subtotal_without_woz + bd.woz_capped
+            if capped_total < LIBERALIZATION_THRESHOLD:
+                if _is_small_newbuild_exception(listing):
+                    flags.append("woz_cap_newbuild_exception")
+                else:
+                    bd.woz_cap_floor = WOZ_CAP_FLOOR_POINTS - capped_total
+                    flags.append("woz_cap_floor_186")
 
     bd.flags = flags
 
