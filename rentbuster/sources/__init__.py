@@ -17,11 +17,16 @@ class ListingSource(Protocol):
     async def close(self) -> None: ...
 
 
-def build_sources(settings, profile) -> list[ListingSource]:
-    """Instantiate enabled listing sources from settings + profile."""
+def build_sources(settings, profile, seen_ids: set[tuple[str, str]] | None = None) -> list[ListingSource]:
+    """Instantiate enabled listing sources from settings + profile.
+
+    ``seen_ids`` are (source, source_id) pairs already in the database; sources use them to
+    avoid re-fetching detail pages for listings they have seen before.
+    """
     sources: list[ListingSource] = []
 
     search = profile.search
+    seen_ids = seen_ids or set()
 
     if settings.pararius_enabled:
         from rentbuster.sources.pararius import ParariusSource
@@ -37,6 +42,7 @@ def build_sources(settings, profile) -> list[ListingSource]:
                 headless=settings.playwright_headless,
                 detail_delay=settings.detail_fetch_delay,
                 fetch_details=settings.fetch_details,
+                skip_detail_ids={sid for src, sid in seen_ids if src == "pararius"},
             )
         )
 

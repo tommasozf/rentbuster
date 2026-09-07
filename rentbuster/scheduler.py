@@ -56,7 +56,7 @@ class RentBuster:
         self.notifiers.process_commands()
 
         # 1. Fetch from all sources
-        sources = build_sources(self.settings, self.profile)
+        sources = build_sources(self.settings, self.profile, seen_ids=self.seen_ids)
         all_listings: list[Listing] = []
 
         for source in sources:
