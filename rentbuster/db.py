@@ -31,7 +31,7 @@ INSERT INTO listings (
     wws_confidence, wws_breakdown, wws_flags,
     woz_value, woz_reference_date, woz_verified,
     suitable_for_students, suitable_for_sharing, guarantor_accepted,
-    rb_estimated_max_rent, rb_savings, rb_confidence,
+    rb_points, rb_estimated_max_rent, rb_savings, rb_confidence,
     bust_score,
     first_seen_at, last_seen_at
 ) VALUES (
@@ -45,7 +45,7 @@ INSERT INTO listings (
     %(wws_confidence)s, %(wws_breakdown)s, %(wws_flags)s,
     %(woz_value)s, %(woz_reference_date)s, %(woz_verified)s,
     %(suitable_for_students)s, %(suitable_for_sharing)s, %(guarantor_accepted)s,
-    %(rb_estimated_max_rent)s, %(rb_savings)s, %(rb_confidence)s,
+    %(rb_points)s, %(rb_estimated_max_rent)s, %(rb_savings)s, %(rb_confidence)s,
     %(bust_score)s,
     NOW(), NOW()
 )
@@ -63,6 +63,7 @@ ON CONFLICT (source, source_id) DO UPDATE SET
     suitable_for_students  = EXCLUDED.suitable_for_students,
     suitable_for_sharing   = EXCLUDED.suitable_for_sharing,
     guarantor_accepted     = EXCLUDED.guarantor_accepted,
+    rb_points           = EXCLUDED.rb_points,
     rb_estimated_max_rent = EXCLUDED.rb_estimated_max_rent,
     rb_savings          = EXCLUDED.rb_savings,
     bust_score          = EXCLUDED.bust_score,
@@ -255,7 +256,8 @@ class Database:
                     SELECT id, source, source_id, url, street, house_number, house_number_addition,
                            postal_code, city, asking_rent, surface_area_m2, num_rooms,
                            energy_label, wws_points, wws_max_rent, wws_savings, wws_confidence,
-                           woz_value, woz_verified, bust_score, first_seen_at, available_from
+                           woz_value, woz_verified, bust_score, first_seen_at, available_from,
+                           rb_points, rb_estimated_max_rent
                     FROM listings
                     WHERE wws_is_bustable = TRUE AND disappeared_at IS NULL
                     ORDER BY bust_score DESC
@@ -304,7 +306,8 @@ class Database:
                     "postal_code, city, asking_rent, surface_area_m2, num_rooms, energy_label, "
                     "wws_points, wws_max_rent, wws_savings, wws_confidence, wws_flags, wws_breakdown, "
                     "woz_value, woz_verified, bust_score, description, available_from, agency_name, "
-                    "suitable_for_students, suitable_for_sharing, guarantor_accepted "
+                    "suitable_for_students, suitable_for_sharing, guarantor_accepted, "
+                    "rb_points, rb_estimated_max_rent "
                     "FROM listings WHERE id = %s",
                     (listing_id,),
                 )
@@ -358,7 +361,7 @@ class Database:
                     "energy_label, construction_year, property_type, interior, description, "
                     "images, available_from, agency_name, "
                     "woz_value, woz_reference_date, woz_verified, "
-                    "rb_estimated_max_rent, rb_savings, rb_confidence "
+                    "rb_points, rb_estimated_max_rent, rb_savings, rb_confidence "
                     "FROM listings ORDER BY first_seen_at DESC"
                 )
                 cols = [desc[0] for desc in cur.description]
@@ -380,6 +383,7 @@ class Database:
             "ALTER TABLE listings ADD COLUMN IF NOT EXISTS suitable_for_students BOOLEAN",
             "ALTER TABLE listings ADD COLUMN IF NOT EXISTS suitable_for_sharing BOOLEAN",
             "ALTER TABLE listings ADD COLUMN IF NOT EXISTS guarantor_accepted BOOLEAN",
+            "ALTER TABLE listings ADD COLUMN IF NOT EXISTS rb_points REAL",
             (
                 "CREATE TABLE IF NOT EXISTS dropped_listings ("
                 "  chat_id BIGINT NOT NULL, source TEXT NOT NULL, source_id TEXT NOT NULL,"

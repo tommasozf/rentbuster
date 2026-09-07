@@ -370,6 +370,15 @@ class TelegramNotifier:
         elif "woz_sibling" in flags:
             estimated_footer = "\nℹ️ WOZ from neighboring unit"
 
+        rb_line = ""
+        if listing.rb_points is not None:
+            rb_line = f"🔍 rent-buster.nl: {listing.rb_points:.0f} pts"
+            if listing.rb_points >= 187:
+                rb_line += " (free market)"
+            elif listing.rb_estimated_max_rent is not None:
+                rb_line += f", max €{listing.rb_estimated_max_rent:.0f}/mo"
+            rb_line += "\n"
+
         return (
             f"🏠 <b>Bustable listing found!</b>\n\n"
             f"📍 <b>{address}, {city}</b>\n"
@@ -377,7 +386,8 @@ class TelegramNotifier:
             f"⚖️ Max legal ({points:.0f} pts): €{max_rent:.0f}/mo\n"
             f"💸 <b>Savings: €{savings:.0f}/mo (€{savings * 12:.0f}/yr)</b>\n\n"
             f"📐 {size_info}  |  ⚡ Label {energy}  |  {woz_str}\n"
-            f"📊 Confidence: {conf}{estimated_footer}\n\n"
+            f"📊 Confidence: {conf}{estimated_footer}\n"
+            f"{rb_line}\n"
             f"⚠️ Verify with Huurcommissie before disputing\n"
             f"📡 Source: {listing.source.value}\n"
             f'🔗 <a href="{listing.url}">View listing</a>'

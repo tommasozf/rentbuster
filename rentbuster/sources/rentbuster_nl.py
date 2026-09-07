@@ -158,6 +158,7 @@ def _item_to_listing(item: dict[str, Any]) -> Listing | None:
         woz_verified=woz_verified,
         construction_year=build_year,
         wws_points=wws_points,
+        rb_points=wws_points,
         rb_estimated_max_rent=rb_max,
         rb_savings=rb_savings,
         images=images,

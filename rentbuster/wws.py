@@ -159,6 +159,22 @@ class WWSBreakdown:
         }
 
 
+# ── rent-buster.nl cross-check ─────────────────────────────────────────────────
+
+
+def rb_agrees(listing: Listing) -> bool:
+    """True when rent-buster.nl's own numbers also make the ad bustable, or when it has none.
+
+    rent-buster.nl scores every ad in its feed with cadastral data we don't have (build year,
+    split status, region), so when both calculations say "bustable" the alert is much safer.
+    """
+    if listing.rb_points is None or listing.rb_estimated_max_rent is None:
+        return True
+    return (
+        listing.rb_points < LIBERALIZATION_THRESHOLD and listing.asking_rent > listing.rb_estimated_max_rent
+    )
+
+
 # ── Calculator ─────────────────────────────────────────────────────────────────
 
 

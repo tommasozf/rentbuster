@@ -18,7 +18,7 @@ from rentbuster.notify import NotifierBundle
 from rentbuster.profile import Profile
 from rentbuster.sources import build_sources
 from rentbuster.woz import lookup_woz
-from rentbuster.wws import calculate_wws
+from rentbuster.wws import calculate_wws, rb_agrees
 
 log = logging.getLogger(__name__)
 
@@ -170,11 +170,7 @@ class RentBuster:
                 self.db.touch_listings(src, ids)
 
         # 8. Filter bustable listings
-        bustable = [
-            ls
-            for ls in new_listings
-            if ls.wws_is_bustable and (ls.wws_savings or 0) >= self.profile.wws.min_savings
-        ]
+        bustable = [ls for ls in new_listings if self._worth_alerting(ls)]
         log.info(
             "new=%d bustable=%d (min_savings=€%d)",
             len(new_listings),
@@ -213,6 +209,20 @@ class RentBuster:
                 _f.write(str(int(_time.time())))
         except Exception:
             pass
+
+    def _worth_alerting(self, listing: Listing) -> bool:
+        if not listing.wws_is_bustable or (listing.wws_savings or 0) < self.profile.wws.min_savings:
+            return False
+        if self.profile.wws.require_rb_agreement and not rb_agrees(listing):
+            log.info(
+                "  skipped %s %s: rent-buster.nl scores it %s pts / €%.0f max",
+                listing.street,
+                listing.house_number,
+                listing.rb_points,
+                listing.rb_estimated_max_rent or 0,
+            )
+            return False
+        return True
 
     def _apply_search_filters(self, listings: list[Listing]) -> list[Listing]:
         search = self.profile.search

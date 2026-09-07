@@ -15,6 +15,9 @@ PROFILES_DIR = Path(__file__).resolve().parent.parent / "profiles"
 class WWSConfig:
     bustable_only: bool = True
     min_savings: int = 50
+    # Only alert when rent-buster.nl's own calculation also says the ad is bustable
+    # (listings without rent-buster.nl data are unaffected).
+    require_rb_agreement: bool = False
     default_outdoor_points: float = -5.0
     default_kitchen_points: float = 4.0
     default_bathroom_points: float = 3.0
@@ -25,6 +28,7 @@ class WWSConfig:
         return cls(
             bustable_only=bool(data.get("bustable_only", True)),
             min_savings=int(data.get("min_savings", 50)),
+            require_rb_agreement=bool(data.get("require_rb_agreement", False)),
             default_outdoor_points=float(data.get("default_outdoor_points", -5.0)),
             default_kitchen_points=float(data.get("default_kitchen_points", 4.0)),
             default_bathroom_points=float(data.get("default_bathroom_points", 3.0)),

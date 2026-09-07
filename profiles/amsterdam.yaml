@@ -14,6 +14,7 @@ search:
 wws:
   bustable_only: true
   min_savings: 50
+  require_rb_agreement: false   # true = only alert when rent-buster.nl also calls it bustable
   default_outdoor_points: -5
   default_kitchen_points: 4
   default_bathroom_points: 3
