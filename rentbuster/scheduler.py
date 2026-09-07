@@ -41,6 +41,14 @@ class RentBuster:
         self.dry_run = dry_run
         self.seen_ids: set[tuple[str, str]] = db.load_seen_source_ids() if db else set()
 
+    @staticmethod
+    async def _fetch_and_close(source) -> list:
+        try:
+            return await source.fetch_listings()
+        finally:
+            with contextlib.suppress(Exception):
+                await source.close()
+
     def check_once(self) -> None:
         log.info("=" * 60)
         log.info("check at %s — profile=%s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.profile.name)
@@ -54,14 +62,11 @@ class RentBuster:
         for source in sources:
             log.info("starting %s...", source.name)
             try:
-                source_listings = asyncio.run(source.fetch_listings())
+                source_listings = asyncio.run(self._fetch_and_close(source))
                 log.info("%s: fetched %d listings", source.name, len(source_listings))
                 all_listings.extend(source_listings)
             except Exception as exc:
                 log.error("%s: fetch failed: %s", source.name, exc)
-            finally:
-                with contextlib.suppress(Exception):
-                    asyncio.run(source.close())
 
         if not all_listings:
             log.info("no listings returned from any source")

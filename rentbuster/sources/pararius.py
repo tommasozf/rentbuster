@@ -188,6 +188,20 @@ class ParariusSource:
         self._stealth = Stealth()
         log.debug("pararius: browser launched")
 
+    # Cloudflare serves the challenge title in the browser context's locale — our context
+    # uses nl-NL, and Pararius has been observed returning "Even geduld..." / "Beveiliging
+    # wordt geverifieerd" (Dutch for "just a moment" / "verifying you're human") instead of
+    # the English strings, so both languages must be checked or the challenge goes undetected.
+    _CF_MARKERS = (
+        "just a moment",
+        "cloudflare",
+        "challenge-platform",
+        "turnstile",
+        "even geduld",
+        "beveiliging wordt geverifieerd",
+        "checking your browser",
+    )
+
     async def _fresh_page(self, url: str) -> tuple:
         """Open url in a fresh browser context (bypasses Cloudflare per-session limits).
 
@@ -207,17 +221,45 @@ class ParariusSource:
         page.set_default_timeout(30_000)
         try:
             await page.goto(url, wait_until="domcontentloaded")
-            await asyncio.sleep(3)
-            for _ in range(10):
-                title = await page.title()
-                if "just a moment" in title.lower() or "cloudflare" in title.lower():
-                    log.debug("pararius: waiting for Cloudflare challenge...")
+            # Wait for either listing cards to appear or Cloudflare to clear
+            for attempt in range(15):
+                cards = await page.query_selector_all("li.search-list__item--listing")
+                if cards:
+                    log.debug("pararius: content ready (%d cards) after ~%ds", len(cards), attempt * 2)
+                    break
+                if await self._is_cloudflare_challenge(page):
+                    log.debug("pararius: Cloudflare challenge detected, waiting...")
                     await asyncio.sleep(3)
                 else:
-                    break
+                    await asyncio.sleep(2)
+            else:
+                log.warning("pararius: timed out waiting for content after 30s")
         except Exception as exc:
             log.warning("pararius: page load issue for %s: %s", url, exc)
         return ctx, page
+
+    async def _is_cloudflare_challenge(self, page) -> bool:
+        title = (await page.title()).lower()
+        if any(m in title for m in self._CF_MARKERS):
+            return True
+        try:
+            # Body markers observed on the actual Turnstile challenge page (2026-09-07):
+            # <title>Even geduld...</title>, a CSP referencing challenges.cloudflare.com,
+            # and a #challenge-error-text element. "cloudflare" alone catches the CSP host
+            # even when the title is untranslated or unrecognized.
+            body = (await page.content())[:5000].lower()
+            return any(
+                m in body
+                for m in (
+                    "challenge-platform",
+                    "cf-turnstile",
+                    "cf-chl-widget",
+                    "cloudflare",
+                    "challenge-error-text",
+                )
+            )
+        except Exception:
+            return False
 
     async def fetch_listings(self) -> list[Listing]:
         listings: list[Listing] = []
@@ -234,7 +276,12 @@ class ParariusSource:
                 finally:
                     await ctx.close()
 
-                if not page_listings and page_num == 1:
+                if not page_listings:
+                    # An empty page can be a real "end of results" OR a Cloudflare challenge
+                    # that outlasted _fresh_page's wait loop (observed happening on pages other
+                    # than page 1 too, e.g. page 3, since the block is per-session/intermittent
+                    # rather than always on the first request). Always retry once with a fresh
+                    # session+delay before concluding pagination is done.
                     log.info("pararius: no cards on page %d, retrying after delay...", page_num)
                     await asyncio.sleep(random.uniform(5.0, 10.0))
                     try:
@@ -289,6 +336,7 @@ class ParariusSource:
         cards = await page.query_selector_all("li.search-list__item--listing")
         if not cards:
             log.warning("pararius: no listing cards found — selector may need updating")
+            await self._dump_debug_info(page)
             return []
 
         listings = []
@@ -301,6 +349,23 @@ class ParariusSource:
                 log.debug("pararius: card parse error: %s", exc)
 
         return listings
+
+    async def _dump_debug_info(self, page) -> None:
+        """Save a screenshot and log a snippet of page HTML for diagnosing
+        selector drift vs. Cloudflare blocks when no listing cards are found."""
+        try:
+            await page.screenshot(path="/tmp/pararius-debug.png", full_page=True)
+            log.warning("pararius: debug screenshot saved to /tmp/pararius-debug.png")
+        except Exception as exc:
+            log.warning("pararius: failed to save debug screenshot: %s", exc)
+
+        try:
+            content = await page.content()
+            title = await page.title()
+            log.warning("pararius: debug page title: %r", title)
+            log.warning("pararius: debug page content (first 2000 chars):\n%s", content[:2000])
+        except Exception as exc:
+            log.warning("pararius: failed to capture debug page content: %s", exc)
 
     async def _parse_card(self, card) -> Listing | None:
         # Link — verified: a.listing-search-item__link--depiction

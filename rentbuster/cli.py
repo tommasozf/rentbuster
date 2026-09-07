@@ -25,6 +25,23 @@ def _setup_logging(verbose: bool) -> None:
     )
 
 
+def _ensure_schema(db: Database) -> None:
+    """Apply schema.sql automatically so a fresh DB is ready with no manual init-db step.
+
+    schema.sql is written entirely with CREATE TABLE/INDEX IF NOT EXISTS, so running it
+    on every startup is a safe no-op once the schema already exists.
+    """
+    if not SCHEMA_PATH.exists():
+        logging.warning("schema file not found at %s — skipping auto schema init", SCHEMA_PATH)
+        return
+    try:
+        schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
+        db.init_schema(schema_sql)
+        logging.info("database schema is up to date")
+    except Exception as exc:
+        logging.error("automatic schema init failed: %s", exc)
+
+
 def _cmd_init_db(args: argparse.Namespace) -> int:
     settings = load_settings()
     if not settings.database_url:
@@ -230,6 +247,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     db: Database | None = None
     if settings.database_url:
         db = Database(settings.database_url)
+        _ensure_schema(db)
     else:
         logging.warning("DATABASE_URL not set — running without persistence")
 

@@ -266,17 +266,17 @@ sudo systemctl enable --now rentbuster
 sudo journalctl -fu rentbuster   # follow logs
 ```
 
-### Option C: Docker
+### Option C: Docker (recommended for a VPS)
 
 ```bash
 cp .env.example .env   # fill in your values
-docker compose up -d db
-docker compose run --rm rentbuster python -m rentbuster init-db
-docker compose up -d rentbuster
+docker compose up -d
 docker compose logs -f rentbuster
 ```
 
-The `docker-compose.yml` includes Postgres. For Pararius, Playwright needs its Chromium deps — the `Dockerfile` installs them.
+`docker-compose.yml` includes Postgres and creates the schema automatically on first run — no
+separate init-db step. The `Dockerfile` bundles Playwright's Chromium and its system deps. See
+[DEPLOY.md](DEPLOY.md) for a full VPS walkthrough.
 
 ---
 
