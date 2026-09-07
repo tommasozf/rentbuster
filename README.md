@@ -22,33 +22,20 @@ rent-buster.nl listings come with pre-computed WWS points, WOZ values, and max r
 
 ## Quick start
 
-Requires Python 3.10+ and either conda, pip, or uv for dependencies.
-
 ```bash
 git clone <this-repo>
 cd rentbuster
+cp .env.example .env   # edit: add your Discord webhook or Telegram bot token; more on this below
+docker compose up -d   # starts Postgres + scraper, creates DB automatically
+docker compose logs -f rentbuster   # watch it find bustable apartments
+```
 
-# Install deps (pick one)
-conda activate rentbuster
-# or: pip install .
-# or: uv sync
+That's it. Postgres, Playwright, Chromium — all bundled. See [DEPLOY.md](DEPLOY.md) for VPS setup.
 
-# Install Playwright's Chromium (required for Pararius)
-playwright install chromium
+**Test it first** (no notifications, no DB writes):
 
-# Copy and fill in config
-cp .env.example .env
-# Edit .env: set at least DISCORD_WEBHOOK_URL or TELEGRAM_BOT_TOKEN
-
-# Start Postgres (required for persistence and /top queries)
-docker compose up -d db        # or: podman-compose up -d db
-python -m rentbuster init-db
-
-# One-shot dry run (no notifications, no DB writes — just shows what it finds)
-python -m rentbuster -v run --once --dry-run
-
-# Run continuously (checks every 2–5 minutes)
-python -m rentbuster run
+```bash
+docker compose run --rm rentbuster run --once --dry-run
 ```
 
 ---
@@ -200,83 +187,27 @@ Pass it with `--profile rotterdam` or set `PROFILE=rotterdam` in `.env`.
 
 ## Database
 
-Postgres is strongly recommended. Without it the scraper has no memory — it re-notifies about the same listings after a restart, and you can't use `/top`.
-
-```bash
-# Start Postgres via Docker/Podman (included in docker-compose.yml)
-docker compose up -d db
-
-# In .env:
-DATABASE_URL=postgres://rentbuster:rentbuster@localhost:5432/rentbuster
-
-# Create tables (run once, safe to re-run)
-python -m rentbuster init-db
-```
-
-The database stores:
+Postgres is included in `docker-compose.yml` and the schema is created automatically on first run. The database stores:
 - All scraped listings with WWS scores and bust rankings
 - WOZ value cache (avoids re-querying Kadaster for known addresses)
 - Telegram subscriber list
 - Scrape run history
 
+Without a database the scraper has no memory — it re-notifies about the same listings after a restart, and you can't use `/top`.
+
 ---
 
-## Running 24/7
+## Running without Docker (dev setup)
 
-Your PC needs to stay on, or run it on a server.
-
-### Option A: tmux on your PC (simple)
+If you want to run the Python code directly instead of Docker:
 
 ```bash
-tmux new -s rentbuster
-conda activate rentbuster
-python -m rentbuster run
-# Ctrl+B, D  →  detach (keeps running)
-# tmux attach -t rentbuster  →  re-attach later
+uv sync                          # or: pip install .
+playwright install chromium      # Pararius needs a real browser
+docker compose up -d db          # just the Postgres container
+cp .env.example .env             # edit with your keys
+python -m rentbuster run         # runs continuously
 ```
-
-### Option B: systemd on a VPS (reliable)
-
-A Hetzner CAX11 (arm64, ~4 EUR/mo) or CX22 (~4.50 EUR/mo) is plenty — the scraper needs ~500 MB RAM for Playwright.
-
-```bash
-# On the VPS, after cloning and installing deps:
-sudo nano /etc/systemd/system/rentbuster.service
-```
-
-```ini
-[Unit]
-Description=RentBuster
-After=network.target
-
-[Service]
-User=youruser
-WorkingDirectory=/opt/rentbuster
-EnvironmentFile=/opt/rentbuster/.env
-ExecStart=/opt/rentbuster/.venv/bin/python -m rentbuster run
-Restart=always
-RestartSec=30
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl enable --now rentbuster
-sudo journalctl -fu rentbuster   # follow logs
-```
-
-### Option C: Docker (recommended for a VPS)
-
-```bash
-cp .env.example .env   # fill in your values
-docker compose up -d
-docker compose logs -f rentbuster
-```
-
-`docker-compose.yml` includes Postgres and creates the schema automatically on first run — no
-separate init-db step. The `Dockerfile` bundles Playwright's Chromium and its system deps. See
-[DEPLOY.md](DEPLOY.md) for a full VPS walkthrough.
 
 ---
 

@@ -45,5 +45,8 @@ dashboard/node_modules/
 dashboard/.next/
 dashboard/tsconfig.tsbuildinfo
 
+# ── Dev notes ──
+NOTES.md
+
 # ── Legacy Vercel marker at root (no longer used) ──
 .vercel/
