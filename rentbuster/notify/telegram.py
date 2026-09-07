@@ -324,6 +324,10 @@ class TelegramNotifier:
             except Exception as exc:
                 log.warning("telegram: handler %s failed: %s", cmd_base, exc)
 
+    def send_text(self, text: str) -> None:
+        for chat_id in self.db.get_telegram_subscribers():
+            self._send(chat_id, text)
+
     def send_listings(self, listings: list[Listing]) -> None:
         subscribers = self.db.get_telegram_subscribers()
         if not subscribers:

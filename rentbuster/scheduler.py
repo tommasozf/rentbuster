@@ -263,6 +263,8 @@ class RentBuster:
 
     def run_forever(self) -> None:
         self._print_banner()
+        if not self.dry_run and self.notifiers.active:
+            self.notifiers.send_text(self._startup_message())
         while True:
             try:
                 self.check_once()
@@ -276,6 +278,21 @@ class RentBuster:
             except KeyboardInterrupt:
                 log.info("interrupted — exiting")
                 break
+
+    def _startup_message(self) -> str:
+        """One line so people can see their webhook/bot works before the first bustable listing."""
+        sources = []
+        if self.settings.pararius_enabled:
+            sources.append("Pararius")
+        if self.settings.rentbuster_nl_enabled:
+            sources.append("rent-buster.nl")
+        return (
+            f"RentBuster started. Profile {self.profile.name} ({self.profile.search.city}, "
+            f"up to €{self.profile.search.max_rent}/mo), sources: {', '.join(sources) or 'none'}, "
+            f"checking every {self.settings.check_interval_min}-{self.settings.check_interval_max}s. "
+            f"You'll get a message for every new listing that looks bustable "
+            f"(min. €{self.profile.wws.min_savings}/mo savings)."
+        )
 
     def _print_banner(self) -> None:
         log.info("RentBuster starting")
