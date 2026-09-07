@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 
 import requests
 
@@ -28,12 +29,16 @@ _HELP_TEXT = (
 class TelegramNotifier:
     name = "telegram"
 
+    _STATE_KEY = "telegram_last_update_id"
+
     def __init__(self, bot_token: str, password: str, db: Database, profile=None) -> None:
         self.bot_token = bot_token
         self.password = password
         self.db = db
         self.profile = profile
-        self._last_update_id = 0
+        self._last_update_id = int(db.get_state(self._STATE_KEY) or 0)
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
 
     def _send(self, chat_id: int, text: str) -> bool:
         try:
@@ -268,15 +273,49 @@ class TelegramNotifier:
         "/top": "_cmd_top",
     }
 
+    # ── Polling ───────────────────────────────────────────────────────────────
+
     def process_commands(self) -> None:
+        """Handle pending commands once (used by `run --once`). A no-op while the
+        background poller is running, so nothing is handled twice."""
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._poll_once(long_poll_seconds=0)
+
+    def start_polling(self) -> None:
+        """Answer commands within seconds instead of once per scrape cycle.
+
+        Runs Telegram long polling in a daemon thread with its own DB connection
+        (psycopg connections are not shared between threads)."""
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._thread = threading.Thread(target=self._poll_forever, name="telegram-poll", daemon=True)
+        self._thread.start()
+        log.info("telegram: command poller started")
+
+    def stop_polling(self) -> None:
+        self._stop.set()
+
+    def _poll_forever(self) -> None:
+        self.db = Database(self.db.url)
+        while not self._stop.is_set():
+            try:
+                self._poll_once(long_poll_seconds=30)
+            except Exception as exc:
+                log.warning("telegram poller: %s", exc)
+                self._stop.wait(5)
+
+    def _poll_once(self, long_poll_seconds: int) -> None:
         try:
             resp = requests.get(
                 f"https://api.telegram.org/bot{self.bot_token}/getUpdates",
-                params={"offset": self._last_update_id + 1, "timeout": 0},
-                timeout=10,
+                params={"offset": self._last_update_id + 1, "timeout": long_poll_seconds},
+                timeout=long_poll_seconds + 10,
             )
         except requests.RequestException as exc:
             log.warning("telegram getUpdates failed: %s", exc)
+            if long_poll_seconds:
+                self._stop.wait(5)
             return
 
         data = resp.json() if resp.ok else {}
@@ -284,45 +323,48 @@ class TelegramNotifier:
             return
 
         for update in data["result"]:
-            self._last_update_id = update["update_id"]
-            message = update.get("message") or {}
-            text = (message.get("text") or "").strip()
-            chat = message.get("chat") or {}
-            chat_id = chat.get("id")
-            if not chat_id or not text:
-                continue
+            self._handle_update(update)
 
-            first_name = chat.get("first_name") or ""
-            username = (message.get("from") or {}).get("username") or ""
+    def _handle_update(self, update: dict) -> None:
+        self._last_update_id = update["update_id"]
+        self.db.set_state(self._STATE_KEY, str(self._last_update_id))
+        message = update.get("message") or {}
+        text = (message.get("text") or "").strip()
+        chat = message.get("chat") or {}
+        chat_id = chat.get("id")
+        if not chat_id or not text:
+            return
 
-            # Split command and args (handle /command@botname form)
-            cmd_part, _, rest = text.partition(" ")
-            cmd_base = cmd_part.split("@")[0].lower()
-            args = rest.strip()
+        first_name = chat.get("first_name") or ""
+        username = (message.get("from") or {}).get("username") or ""
 
-            handler_name = self._DISPATCH.get(cmd_base)
-            if not handler_name:
-                continue
+        # Split command and args (handle /command@botname form)
+        cmd_part, _, rest = text.partition(" ")
+        cmd_base = cmd_part.split("@")[0].lower()
+        args = rest.strip()
 
-            try:
-                if cmd_base == "/start":
-                    self._cmd_start(chat_id, args, username, first_name)
-                elif cmd_base == "/stop":
-                    self._cmd_stop(chat_id, first_name)
-                elif cmd_base == "/help":
-                    self._cmd_help(chat_id)
-                elif cmd_base in ("/list", "/top"):
-                    self._cmd_list(chat_id, args)
-                elif cmd_base == "/detail":
-                    self._cmd_detail(chat_id, args)
-                elif cmd_base == "/drop":
-                    self._cmd_drop(chat_id, args)
-                elif cmd_base == "/status":
-                    self._cmd_status(chat_id)
-                elif cmd_base == "/filters":
-                    self._cmd_filters(chat_id)
-            except Exception as exc:
-                log.warning("telegram: handler %s failed: %s", cmd_base, exc)
+        if cmd_base not in self._DISPATCH:
+            return
+
+        try:
+            if cmd_base == "/start":
+                self._cmd_start(chat_id, args, username, first_name)
+            elif cmd_base == "/stop":
+                self._cmd_stop(chat_id, first_name)
+            elif cmd_base == "/help":
+                self._cmd_help(chat_id)
+            elif cmd_base in ("/list", "/top"):
+                self._cmd_list(chat_id, args)
+            elif cmd_base == "/detail":
+                self._cmd_detail(chat_id, args)
+            elif cmd_base == "/drop":
+                self._cmd_drop(chat_id, args)
+            elif cmd_base == "/status":
+                self._cmd_status(chat_id)
+            elif cmd_base == "/filters":
+                self._cmd_filters(chat_id)
+        except Exception as exc:
+            log.warning("telegram: handler %s failed: %s", cmd_base, exc)
 
     def send_listings(self, listings: list[Listing]) -> None:
         subscribers = self.db.get_telegram_subscribers()

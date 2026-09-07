@@ -105,6 +105,14 @@ CREATE TABLE IF NOT EXISTS telegram_subscribers (
     subscribed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- ── Small key/value state (e.g. the last Telegram update id) ─────────
+
+CREATE TABLE IF NOT EXISTS app_state (
+    key        TEXT PRIMARY KEY,
+    value      TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- ── Dropped listings (per-subscriber hide list) ─────────────────────
 
 CREATE TABLE IF NOT EXISTS dropped_listings (

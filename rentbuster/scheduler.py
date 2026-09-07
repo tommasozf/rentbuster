@@ -263,6 +263,7 @@ class RentBuster:
 
     def run_forever(self) -> None:
         self._print_banner()
+        self.notifiers.start_background()
         while True:
             try:
                 self.check_once()
