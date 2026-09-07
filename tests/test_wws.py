@@ -77,8 +77,8 @@ class TestCalculateWWS:
     def test_woz_cap_floors_at_186_points(self):
         # Huurcommissie example: 109 non-WOZ points and 109 WOZ points (218 total, free market).
         # With the cap WOZ counts for at most 33%: 53.7 → 53, total 162, which becomes 186.
-        # 90 m² + label C (15) + defaults (-5 + 4 + 3 + 2) = 109 non-WOZ points, like the example.
-        listing = self._make_listing(woz_value=10_000_000, surface_area_m2=90)
+        # 85 m² + label C (15) + defaults (-5 + 4 + 8 + 2) = 109 non-WOZ points, like the example.
+        listing = self._make_listing(woz_value=10_000_000, surface_area_m2=85)
         bd = calculate_wws(listing)
         non_woz = bd.surface_area + bd.energy_label + bd.outdoor_space + bd.kitchen + bd.bathroom + bd.heating
         assert non_woz == 109

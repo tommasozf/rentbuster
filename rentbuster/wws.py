@@ -20,6 +20,7 @@ from rentbuster.woz import WOZ_ESTIMATE_DEFAULT, WOZ_ESTIMATE_PER_M2
 
 if TYPE_CHECKING:
     from rentbuster.llm import LLMExtraction
+    from rentbuster.profile import WWSConfig
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -52,11 +53,16 @@ WOZ_MAX_PERCENTAGE = 0.33
 WOZ_CAP_FLOOR_POINTS = 186
 _NEWBUILD_EXCEPTION_CITIES = {"amsterdam", "utrecht"}
 
-# Conservative defaults when detail data is missing (intentionally low = more likely flagged)
-DEFAULT_OUTDOOR_POINTS = -5.0  # no outdoor space known
-DEFAULT_KITCHEN_POINTS = 4.0  # minimal kitchen
-DEFAULT_BATHROOM_POINTS = 3.0  # minimal bathroom
-DEFAULT_HEATING_POINTS = 2.0  # basic heating
+# Defaults when the ad gives no detail. These are the lowest values a normal home can score
+# under the 2026 rules, so they stay conservative without being impossible:
+#   outdoor  -5   no private or shared outdoor space (the penalty the rules apply)
+#   kitchen   4   counter of 1-2 m, no extras
+#   bathroom  8   toilet 3 + shower 4 + washbasin 1
+#   heating   2   per heated room (rubriek 3), multiplied by the room count
+DEFAULT_OUTDOOR_POINTS = -5.0
+DEFAULT_KITCHEN_POINTS = 4.0
+DEFAULT_BATHROOM_POINTS = 8.0
+DEFAULT_HEATING_POINTS_PER_ROOM = 2.0
 
 # Bijlage 3 — maximale huurprijsgrenzen (Huurcommissie), loaded from rentbuster/data/huurprijsgrenzen.json.
 # The table is republished every 1 January; see the JSON file for the source URL and valid_from date.
@@ -154,14 +160,24 @@ def _is_small_newbuild_exception(listing: Listing) -> bool:
     )
 
 
-def calculate_wws(listing: Listing, llm_extraction: LLMExtraction | None = None) -> WWSBreakdown:
+def calculate_wws(
+    listing: Listing,
+    llm_extraction: LLMExtraction | None = None,
+    defaults: WWSConfig | None = None,
+) -> WWSBreakdown:
     """Calculate WWS points for a listing; mutates listing in place with results.
 
-    If llm_extraction is provided, its values replace the conservative defaults
-    for outdoor space, kitchen, bathroom, and heating.
+    If llm_extraction is provided, its values replace the defaults for outdoor space,
+    kitchen, bathroom and heating. ``defaults`` (the profile's ``wws`` section) overrides
+    the module-level default points.
     """
     bd = WWSBreakdown()
     flags: list[str] = []
+    rooms = max(listing.num_rooms or 0, 1)
+    d_outdoor = defaults.default_outdoor_points if defaults else DEFAULT_OUTDOOR_POINTS
+    d_kitchen = defaults.default_kitchen_points if defaults else DEFAULT_KITCHEN_POINTS
+    d_bathroom = defaults.default_bathroom_points if defaults else DEFAULT_BATHROOM_POINTS
+    d_heating = defaults.default_heating_points if defaults else DEFAULT_HEATING_POINTS_PER_ROOM
 
     # 1. Surface area — 1 point per m²
     if listing.surface_area_m2 and listing.surface_area_m2 > 0:
@@ -207,16 +223,16 @@ def calculate_wws(listing: Listing, llm_extraction: LLMExtraction | None = None)
         bd.outdoor_space = llm_extraction.outdoor_points
         bd.kitchen = llm_extraction.kitchen_points
         bd.bathroom = llm_extraction.bathroom_points
-        bd.heating = llm_extraction.heating_points
+        bd.heating = llm_extraction.heating_points_for(rooms)
         flags.append("llm_extracted")
     else:
-        bd.outdoor_space = DEFAULT_OUTDOOR_POINTS
+        bd.outdoor_space = d_outdoor
         flags.append("outdoor_space_assumed_none")
-        bd.kitchen = DEFAULT_KITCHEN_POINTS
+        bd.kitchen = d_kitchen
         flags.append("kitchen_assumed_minimal")
-        bd.bathroom = DEFAULT_BATHROOM_POINTS
+        bd.bathroom = d_bathroom
         flags.append("bathroom_assumed_minimal")
-        bd.heating = DEFAULT_HEATING_POINTS
+        bd.heating = d_heating * rooms
         flags.append("heating_assumed_basic")
 
     # WOZ cap: only for homes that reach 187 points without it. Capped WOZ points are rounded

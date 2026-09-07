@@ -31,46 +31,47 @@ class TestLLMExtractionPoints:
 
     def test_private_balcony_points(self):
         ext = LLMExtraction(has_private_outdoor=True, outdoor_area_m2=5, outdoor_shared=False)
-        assert ext.outdoor_points == 10.0  # 5m² * 2.0
+        assert ext.outdoor_points == 3.75  # 2 + 5m² * 0.35
 
     def test_shared_garden_points(self):
         ext = LLMExtraction(has_private_outdoor=False, outdoor_area_m2=20, outdoor_shared=True)
-        assert ext.outdoor_points == 15.0  # 20m² * 0.75
+        assert ext.outdoor_points == 0.0  # shared: share per address unknown, no penalty either
 
-    def test_outdoor_no_area_gives_zero(self):
+    def test_outdoor_no_area_gives_presence_points(self):
         ext = LLMExtraction(has_private_outdoor=True, outdoor_area_m2=None)
-        assert ext.outdoor_points == 0.0
+        assert (
+            ext.outdoor_points == 2.0
+        )  # private outdoor mentioned, size unknown: just the 2 presence points
 
     def test_kitchen_quality_points(self):
         assert LLMExtraction(kitchen_quality="minimal").kitchen_points == 4.0
         assert LLMExtraction(kitchen_quality="standard").kitchen_points == 7.0
         assert LLMExtraction(kitchen_quality="well_equipped").kitchen_points == 10.0
-        assert LLMExtraction(kitchen_quality="luxury").kitchen_points == 13.0
+        assert LLMExtraction(kitchen_quality="luxury").kitchen_points == 14.0
 
     def test_bathroom_quality_points(self):
-        assert LLMExtraction(bathroom_quality="basic").bathroom_points == 3.0
-        assert LLMExtraction(bathroom_quality="standard").bathroom_points == 5.0
-        assert LLMExtraction(bathroom_quality="full").bathroom_points == 8.0
-        assert LLMExtraction(bathroom_quality="luxury").bathroom_points == 12.0
+        assert LLMExtraction(bathroom_quality="basic").bathroom_points == 8.0
+        assert LLMExtraction(bathroom_quality="standard").bathroom_points == 8.0
+        assert LLMExtraction(bathroom_quality="full").bathroom_points == 11.0
+        assert LLMExtraction(bathroom_quality="luxury").bathroom_points == 13.0
 
     def test_bathroom_bathtub_bonus(self):
         ext = LLMExtraction(bathroom_quality="standard", has_bathtub=True)
-        assert ext.bathroom_points == 7.0  # 5.0 + 2.0
+        assert ext.bathroom_points == 11.0  # 8.0 + 3.0 (bath + shower)
 
     def test_bathroom_bathtub_no_bonus_for_full(self):
         ext = LLMExtraction(bathroom_quality="full", has_bathtub=True)
-        assert ext.bathroom_points == 8.0  # no extra — already included
+        assert ext.bathroom_points == 11.0  # no extra — already included
 
     def test_second_bathroom_bonus(self):
         ext = LLMExtraction(bathroom_quality="basic", has_second_bathroom=True)
-        assert ext.bathroom_points == 6.0  # 3.0 + 3.0
+        assert ext.bathroom_points == 12.0  # 8.0 + 4.0 (second toilet + washbasin)
 
     def test_heating_type_points(self):
-        assert LLMExtraction(heating_type="central").heating_points == 2.0
-        assert LLMExtraction(heating_type="district").heating_points == 2.0
-        assert LLMExtraction(heating_type="individual").heating_points == 1.0
-        assert LLMExtraction(heating_type="floor").heating_points == 3.0
-        assert LLMExtraction(heating_type="unknown").heating_points == 2.0
+        assert LLMExtraction(heating_type="central").heating_points_for(3) == 6.0
+        assert LLMExtraction(heating_type="district").heating_points_for(2) == 4.0
+        assert LLMExtraction(heating_type="floor").heating_points_for(1) == 2.0
+        assert LLMExtraction(heating_type="unknown").heating_points_for(0) == 2.0
 
 
 class TestWWSWithLLMExtraction:
@@ -85,10 +86,10 @@ class TestWWSWithLLMExtraction:
         )
         bd = calculate_wws(listing, llm_extraction=ext)
 
-        assert bd.outdoor_space == 16.0  # 8m² * 2.0
+        assert bd.outdoor_space == 4.8  # 2 + 8m² * 0.35
         assert bd.kitchen == 10.0
-        assert bd.bathroom == 8.0
-        assert bd.heating == 3.0
+        assert bd.bathroom == 11.0
+        assert bd.heating == 2.0 * max(listing.num_rooms, 1)
         assert "llm_extracted" in bd.flags
         assert "outdoor_space_assumed_none" not in bd.flags
 
@@ -98,8 +99,8 @@ class TestWWSWithLLMExtraction:
 
         assert bd.outdoor_space == -5.0
         assert bd.kitchen == 4.0
-        assert bd.bathroom == 3.0
-        assert bd.heating == 2.0
+        assert bd.bathroom == 8.0
+        assert bd.heating == 2.0 * max(listing.num_rooms, 1)
         assert "outdoor_space_assumed_none" in bd.flags
         assert "llm_extracted" not in bd.flags
 

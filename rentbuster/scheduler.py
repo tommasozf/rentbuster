@@ -149,7 +149,7 @@ class RentBuster:
         # 7. Calculate WWS points
         for listing in new_listings:
             key = f"{listing.source.value}:{listing.source_id}"
-            calculate_wws(listing, llm_extraction=extractions.get(key))
+            calculate_wws(listing, llm_extraction=extractions.get(key), defaults=self.profile.wws)
             log.debug(
                 "  %s %s — %s pts → €%s/mo (bustable=%s)",
                 listing.street,

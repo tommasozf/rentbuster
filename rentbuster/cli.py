@@ -147,6 +147,7 @@ def _cmd_recalculate(args: argparse.Namespace) -> int:
         print("error: DATABASE_URL is not set", file=sys.stderr)
         return 1
 
+    profile = load_profile(settings.profile)
     db = Database(settings.database_url)
     rows = db.load_all_listings()
     if not rows:
@@ -206,7 +207,7 @@ def _cmd_recalculate(args: argparse.Namespace) -> int:
         if not listing.woz_value:
             lookup_woz(listing)
         key = f"{listing.source.value}:{listing.source_id}"
-        calculate_wws(listing, llm_extraction=extractions.get(key))
+        calculate_wws(listing, llm_extraction=extractions.get(key), defaults=profile.wws)
         if listing.wws_is_bustable:
             bustable += 1
 

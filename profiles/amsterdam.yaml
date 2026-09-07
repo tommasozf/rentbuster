@@ -14,7 +14,8 @@ search:
 wws:
   bustable_only: true
   min_savings: 50
-  default_outdoor_points: -5
-  default_kitchen_points: 4
-  default_bathroom_points: 3
-  default_heating_points: 2
+  # Used when the ad gives no detail (and no LLM extraction). Minimums under the 2026 rules:
+  default_outdoor_points: -5      # no outdoor space at all
+  default_kitchen_points: 4       # counter 1-2 m
+  default_bathroom_points: 8      # toilet 3 + shower 4 + washbasin 1
+  default_heating_points: 2       # per heated room

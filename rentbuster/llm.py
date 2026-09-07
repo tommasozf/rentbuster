@@ -151,40 +151,43 @@ class LLMExtraction:
     suitable_for_sharing: bool | None = None
     guarantor_accepted: bool | None = None
 
+    # Point values below follow the Huurcommissie policy book 2026 (rubriek 3, 4, 5 and 8).
+
     @property
     def outdoor_points(self) -> float:
+        """Private outdoor space: 2 points + 0.35 per m², max 15. Shared: 0.75 per m² divided
+        over all addresses, which the ad never tells us, so shared counts 0 (no -5 penalty)."""
         if not self.has_private_outdoor and not self.outdoor_shared:
             return -5.0
-        area = self.outdoor_area_m2 or 0
-        if area <= 0:
+        if self.outdoor_shared and not self.has_private_outdoor:
             return 0.0
-        rate = 0.75 if self.outdoor_shared else 2.0
-        return area * rate
+        area = self.outdoor_area_m2 or 0
+        return min(15.0, 2.0 + area * 0.35)
 
     @property
     def kitchen_points(self) -> float:
-        return {"minimal": 4.0, "standard": 7.0, "well_equipped": 10.0, "luxury": 13.0}.get(
+        """Counter 1-2 m = 4, over 2 m = 7; extra appliances count up to the counter points."""
+        return {"minimal": 4.0, "standard": 7.0, "well_equipped": 10.0, "luxury": 14.0}.get(
             self.kitchen_quality, 4.0
         )
 
     @property
     def bathroom_points(self) -> float:
-        base = {"basic": 3.0, "standard": 5.0, "full": 8.0, "luxury": 12.0}.get(self.bathroom_quality, 3.0)
+        """Toilet 3, washbasin 1, shower 4, bath 6, bath + shower 7, plus a few for extras."""
+        base = {"basic": 8.0, "standard": 8.0, "full": 11.0, "luxury": 13.0}.get(self.bathroom_quality, 8.0)
         if self.has_bathtub and self.bathroom_quality not in ("full", "luxury"):
-            base += 2.0
+            base += 3.0  # bath + shower (7) instead of shower only (4)
         if self.has_second_bathroom:
-            base += 3.0
+            base += 4.0  # second toilet 3 + washbasin 1
         return base
 
     @property
-    def heating_points(self) -> float:
-        return {
-            "central": 2.0,
-            "district": 2.0,
-            "individual": 1.0,
-            "floor": 3.0,
-            "unknown": 2.0,
-        }.get(self.heating_type, 2.0)
+    def heating_points_per_room(self) -> float:
+        """2 points per heated room, whatever the heating type; nothing if none is mentioned."""
+        return 2.0
+
+    def heating_points_for(self, rooms: int) -> float:
+        return self.heating_points_per_room * max(rooms, 1)
 
 
 def _build_user_message(listing: Listing) -> str:
@@ -313,7 +316,7 @@ def extract_batch(
                 extraction.outdoor_points,
                 extraction.kitchen_points,
                 extraction.bathroom_points,
-                extraction.heating_points,
+                extraction.heating_points_for(listing.num_rooms),
             )
         if i < len(candidates) - 1:
             time.sleep(0.2)

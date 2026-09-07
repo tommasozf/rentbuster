@@ -17,8 +17,8 @@ class WWSConfig:
     min_savings: int = 50
     default_outdoor_points: float = -5.0
     default_kitchen_points: float = 4.0
-    default_bathroom_points: float = 3.0
-    default_heating_points: float = 2.0
+    default_bathroom_points: float = 8.0
+    default_heating_points: float = 2.0  # per heated room
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> WWSConfig:
@@ -27,7 +27,7 @@ class WWSConfig:
             min_savings=int(data.get("min_savings", 50)),
             default_outdoor_points=float(data.get("default_outdoor_points", -5.0)),
             default_kitchen_points=float(data.get("default_kitchen_points", 4.0)),
-            default_bathroom_points=float(data.get("default_bathroom_points", 3.0)),
+            default_bathroom_points=float(data.get("default_bathroom_points", 8.0)),
             default_heating_points=float(data.get("default_heating_points", 2.0)),
         )
 
