@@ -21,18 +21,13 @@ class Settings(BaseSettings):
     )
 
     # ── Sources ──
+    # Which sources run and how the browser behaves. What to search for (city, rent ceiling,
+    # number of pages, minimum savings) lives in the profile YAML, not here.
     pararius_enabled: bool = True
-    pararius_max_pages: int = 5
     rentbuster_nl_enabled: bool = True
-    rentbuster_nl_max_pages: int = 10
-    funda_enabled: bool = True
     playwright_headless: bool = True
     fetch_details: bool = True
     detail_fetch_delay: float = 2.0
-
-    # ── WWS filtering ──
-    wws_bustable_only: bool = True
-    wws_min_savings: int = 50  # minimum EUR/month savings to notify
 
     # ── Notifications: Discord ──
     discord_webhook_url: str | None = None
@@ -64,8 +59,7 @@ class Settings(BaseSettings):
     check_interval_min: int = 120
     check_interval_max: int = 300
 
-    # ── City / Profile ──
-    city: str = "amsterdam"
+    # ── Profile ──
     profile: str = Field(
         default="amsterdam",
         description="Profile name (looks up profiles/<name>.yaml) or absolute path to a YAML file.",
