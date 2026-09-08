@@ -53,7 +53,8 @@ CREATE TABLE IF NOT EXISTS listings (
     suitable_for_sharing     BOOLEAN,
     guarantor_accepted       BOOLEAN,
 
-    -- Rent-buster.nl cross-reference
+    -- Rent-buster.nl cross-reference (their own calculation for the same ad)
+    rb_points                REAL,
     rb_estimated_max_rent    REAL,
     rb_savings               REAL,
     rb_confidence            TEXT,

@@ -62,6 +62,8 @@ def deduplicate(listings: list[Listing]) -> list[Listing]:
 
 def _merge_rb_fields(target: Listing, rb_source: Listing) -> None:
     """Copy rent-buster.nl cross-reference fields from rb_source into target."""
+    if rb_source.rb_points is not None and target.rb_points is None:
+        target.rb_points = rb_source.rb_points
     if rb_source.rb_estimated_max_rent is not None and target.rb_estimated_max_rent is None:
         target.rb_estimated_max_rent = rb_source.rb_estimated_max_rent
     if rb_source.rb_savings is not None and target.rb_savings is None:

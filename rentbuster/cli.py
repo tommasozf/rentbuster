@@ -187,6 +187,7 @@ def _cmd_recalculate(args: argparse.Namespace) -> int:
                 woz_value=r.get("woz_value"),
                 woz_reference_date=r.get("woz_reference_date"),
                 woz_verified=bool(r.get("woz_verified")),
+                rb_points=r.get("rb_points"),
                 rb_estimated_max_rent=r.get("rb_estimated_max_rent"),
                 rb_savings=r.get("rb_savings"),
                 rb_confidence=r.get("rb_confidence"),

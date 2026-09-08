@@ -39,6 +39,18 @@ def _confidence_emoji(listing: Listing) -> str:
     return mapping.get(listing.wws_confidence, "⚪")
 
 
+def _rb_summary(listing: Listing) -> str:
+    """'220 pts → free market' or '162 pts • max €1,042'."""
+    pts = listing.rb_points
+    max_rent = listing.rb_estimated_max_rent
+    parts = []
+    if pts is not None:
+        parts.append(f"{pts:.0f} pts" + (" → free market" if pts >= 187 else ""))
+    if max_rent is not None and (pts is None or pts < 187):
+        parts.append(f"max €{max_rent:,.0f}")
+    return " • ".join(parts)
+
+
 def format_listing(listing: Listing) -> DiscordEmbed:
     address = f"{listing.street} {listing.house_number}"
     if listing.house_number_addition:
@@ -104,6 +116,9 @@ def format_listing(listing: Listing) -> DiscordEmbed:
                 value=_truncate("\n".join(f"• {f}" for f in important_flags[:4]), 1024),
                 inline=False,
             )
+
+    if listing.rb_points is not None or listing.rb_estimated_max_rent is not None:
+        embed.add_embed_field(name="🔍 rent-buster.nl says", value=_rb_summary(listing), inline=True)
 
     if listing.agency_name:
         embed.add_embed_field(name="🏢 Agency", value=listing.agency_name, inline=True)

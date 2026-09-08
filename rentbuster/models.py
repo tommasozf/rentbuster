@@ -95,7 +95,8 @@ class Listing:
     suitable_for_sharing: bool | None = None
     guarantor_accepted: bool | None = None
 
-    # Rent-buster.nl cross-ref
+    # Rent-buster.nl cross-ref (their own calculation for the same ad)
+    rb_points: float | None = None
     rb_estimated_max_rent: float | None = None
     rb_savings: float | None = None
     rb_confidence: str | None = None
@@ -143,6 +144,7 @@ class Listing:
             "suitable_for_students": self.suitable_for_students,
             "suitable_for_sharing": self.suitable_for_sharing,
             "guarantor_accepted": self.guarantor_accepted,
+            "rb_points": self.rb_points,
             "rb_estimated_max_rent": self.rb_estimated_max_rent,
             "rb_savings": self.rb_savings,
             "rb_confidence": self.rb_confidence,
