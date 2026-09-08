@@ -231,6 +231,14 @@ bust_score = monthly_savings x confidence_multiplier x woz_multiplier
 
 A listing asking EUR 2000/mo with a legal max of EUR 800/mo, HIGH confidence, and verified WOZ scores `1200 x 1.0 x 1.0 = 1200`. The higher the score, the more worth pursuing.
 
+### Checking the scoring
+
+rent-buster.nl publishes its own points and max rent for every ad. To see how far our calculator is from theirs (and whether a change to `wws.py` helped):
+
+```bash
+uv run python scripts/benchmark_rentbuster_nl.py --pages 10
+```
+
 ---
 
 ## Legal
