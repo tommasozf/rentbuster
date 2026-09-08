@@ -57,7 +57,7 @@ class TelegramNotifier:
             return False
 
     def _require_subscribed(self, chat_id: int) -> bool:
-        return chat_id in self.db.get_telegram_subscribers()
+        return chat_id in self._active_db.get_telegram_subscribers()
 
     # ── Command handlers ──────────────────────────────────────────────────────
 
@@ -66,7 +66,7 @@ class TelegramNotifier:
         if given != self.password:
             self._send(chat_id, "🔒 Password required.\n\nSend: <code>/start yourpassword</code>")
             return
-        is_new = self.db.add_telegram_subscriber(chat_id, username, first_name)
+        is_new = self._active_db.add_telegram_subscriber(chat_id, username, first_name)
         if is_new:
             self._send(
                 chat_id,
@@ -79,7 +79,7 @@ class TelegramNotifier:
             self._send(chat_id, "You're already subscribed! 👍\n\nSend /help for commands.")
 
     def _cmd_stop(self, chat_id: int, first_name: str) -> None:
-        removed = self.db.remove_telegram_subscriber(chat_id)
+        removed = self._active_db.remove_telegram_subscriber(chat_id)
         if removed:
             self._send(chat_id, "👋 Unsubscribed. Send <code>/start yourpassword</code> to resubscribe.")
             log.info("telegram unsubscribe: %s (%s)", first_name, chat_id)
@@ -98,7 +98,7 @@ class TelegramNotifier:
             n = max(1, min(n, 20))
         except ValueError:
             n = 5
-        listings = self.db.get_top_listings(n)
+        listings = self._active_db.get_top_listings(n)
         if not listings:
             self._send(chat_id, "No bustable listings found yet.")
             return
@@ -133,7 +133,7 @@ class TelegramNotifier:
         except (ValueError, AttributeError):
             self._send(chat_id, "Usage: /detail &lt;id&gt;")
             return
-        r = self.db.get_listing_by_id(listing_id)
+        r = self._active_db.get_listing_by_id(listing_id)
         if not r:
             self._send(chat_id, f"Listing #{listing_id} not found.")
             return
@@ -202,11 +202,11 @@ class TelegramNotifier:
         except (ValueError, AttributeError):
             self._send(chat_id, "Usage: /drop &lt;id&gt;")
             return
-        r = self.db.get_listing_by_id(listing_id)
+        r = self._active_db.get_listing_by_id(listing_id)
         if not r:
             self._send(chat_id, f"Listing #{listing_id} not found.")
             return
-        self.db.drop_listing(chat_id, r["source"], r["source_id"])
+        self._active_db.drop_listing(chat_id, r["source"], r["source_id"])
         addr = f"{r.get('street', '')} {r.get('house_number', '')}"
         self._send(chat_id, f"✅ {addr} (#{listing_id}) hidden from future alerts.")
         log.info("telegram: chat %s dropped listing #%s", chat_id, listing_id)
@@ -215,8 +215,8 @@ class TelegramNotifier:
         if not self._require_subscribed(chat_id):
             self._send(chat_id, "🔒 Subscribe first with <code>/start yourpassword</code>")
             return
-        run = self.db.get_last_scrape_run()
-        counts = self.db.get_listing_count()
+        run = self._active_db.get_last_scrape_run()
+        counts = self._active_db.get_listing_count()
         lines = ["📊 <b>RentBuster Status</b>\n"]
         if run:
             finished = run.get("finished_at")
@@ -297,13 +297,20 @@ class TelegramNotifier:
         self._stop.set()
 
     def _poll_forever(self) -> None:
-        self.db = Database(self.db.url)
+        self._poll_db = Database(self.db.url)
         while not self._stop.is_set():
             try:
                 self._poll_once(long_poll_seconds=30)
             except Exception as exc:
                 log.warning("telegram poller: %s", exc)
                 self._stop.wait(5)
+
+    @property
+    def _active_db(self) -> Database:
+        """Return the polling thread's DB when called from it, otherwise the main DB."""
+        if hasattr(self, "_poll_db") and threading.current_thread() is self._thread:
+            return self._poll_db
+        return self.db
 
     def _poll_once(self, long_poll_seconds: int) -> None:
         try:
@@ -327,7 +334,7 @@ class TelegramNotifier:
 
     def _handle_update(self, update: dict) -> None:
         self._last_update_id = update["update_id"]
-        self.db.set_state(self._STATE_KEY, str(self._last_update_id))
+        self._active_db.set_state(self._STATE_KEY, str(self._last_update_id))
         message = update.get("message") or {}
         text = (message.get("text") or "").strip()
         chat = message.get("chat") or {}

@@ -34,7 +34,7 @@ class _FakeDB:
 
 def _make(monkeypatch, tmp_path, db=None):
     monkeypatch.setattr(scheduler_mod, "HEARTBEAT_PATH", str(tmp_path / "last_run"))
-    monkeypatch.setattr(scheduler_mod, "build_sources", lambda settings, profile: [_EmptySource()])
+    monkeypatch.setattr(scheduler_mod, "build_sources", lambda settings, profile, **kw: [_EmptySource()])
     return RentBuster(
         settings=Settings(_env_file=None),
         profile=load_profile("amsterdam"),
