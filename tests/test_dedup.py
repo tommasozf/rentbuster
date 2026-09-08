@@ -84,3 +84,13 @@ class TestDeduplicate:
         result = deduplicate([par, par2])
         assert len(result) == 1
         assert result[0].energy_label == EnergyLabel.B
+
+
+class TestListingsWithoutHouseNumber:
+    def test_are_never_merged(self):
+        from rentbuster.dedup import deduplicate
+        from rentbuster.models import Listing, Source
+
+        a = Listing(source=Source.PARARIUS, source_id="a", url="u", street="Frans Halsstraat")
+        b = Listing(source=Source.PARARIUS, source_id="b", url="u", street="Frans Halsstraat")
+        assert len(deduplicate([a, b])) == 2

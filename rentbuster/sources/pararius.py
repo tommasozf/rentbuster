@@ -11,6 +11,7 @@ import logging
 import random
 import re
 
+from rentbuster.address import split_street_number
 from rentbuster.models import EnergyLabel, Listing, Source
 
 log = logging.getLogger(__name__)
@@ -32,7 +33,6 @@ _PROPERTY_TYPE_PREFIXES = {
 _PRICE_RE = re.compile(r"[\d]+")
 _AREA_RE = re.compile(r"(\d+)\s*m")
 _POSTAL_RE = re.compile(r"\b(\d{4})\s*([A-Z]{2})\b")
-_ADDRESS_RE = re.compile(r"^(.+?)\s+(\d+[-–]?\d*)\s*([A-Za-z]*)$")
 _YEAR_RE = re.compile(r"\b(1[6-9]\d{2}|20[0-2]\d)\b")
 
 
@@ -89,20 +89,8 @@ def _parse_address(title: str) -> tuple[str, str, str, str]:
         property_type = _PROPERTY_TYPE_PREFIXES[words[0].lower()]
         words = words[1:]
 
-    address = " ".join(words)
-    m = _ADDRESS_RE.match(address)
-    if m:
-        street = m.group(1).strip()
-        number = m.group(2).strip()
-        addition = m.group(3).strip()
-        return property_type, street, number, addition
-
-    # Fallback: find last digit sequence
-    parts = address.rsplit(" ", 1)
-    if len(parts) == 2 and re.match(r"\d", parts[1]):
-        return property_type, parts[0], parts[1], ""
-
-    return property_type, address, "", ""
+    street, number, addition = split_street_number(" ".join(words))
+    return property_type, street, number, addition
 
 
 def _parse_rooms(text: str) -> int:

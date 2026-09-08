@@ -25,12 +25,17 @@ def deduplicate(listings: list[Listing]) -> list[Listing]:
     When the same address appears across sources, prefer the higher-priority
     listing (Pararius > Funda > Kamernet > rentbuster_nl) and merge
     rent-buster.nl cross-reference data into it where available.
-    For same-source duplicates, keep the first occurrence.
+    For same-source duplicates, keep the first occurrence. Listings without a house number
+    (Pararius hides it on some ads) are never merged.
     """
     seen: dict[str, Listing] = {}
     result: list[Listing] = []
 
     for listing in listings:
+        if not listing.house_number:
+            # Without a house number every "Frans Halsstraat" would collapse into one entry.
+            result.append(listing)
+            continue
         key = listing.address_key
         if key not in seen:
             seen[key] = listing
