@@ -22,6 +22,9 @@ from rentbuster.wws import calculate_wws
 
 log = logging.getLogger(__name__)
 
+# Touched at the end of every cycle; the Docker HEALTHCHECK reads it.
+HEARTBEAT_PATH = "/tmp/rentbuster_last_run"
+
 
 class RentBuster:
     """Stateful pipeline. One instance per process."""
@@ -50,9 +53,25 @@ class RentBuster:
                 await source.close()
 
     def check_once(self) -> None:
+        """Run one scrape cycle. Always logs the run and touches the heartbeat, even on a
+        quiet cycle (no listings / nothing new) or an error."""
         log.info("=" * 60)
         log.info("check at %s — profile=%s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.profile.name)
 
+        total = new = bustable = 0
+        note: str | None = None
+        try:
+            total, new, bustable, note = self._run_cycle()
+        except Exception as exc:
+            note = f"error: {exc}"
+            raise
+        finally:
+            if self.db and not self.dry_run:
+                self.db.log_scrape_run("all", total, new, bustable, note)
+            self._touch_heartbeat()
+
+    def _run_cycle(self) -> tuple[int, int, int, str | None]:
+        """Fetch, score, persist and notify. Returns (total, new, bustable, note)."""
         self.notifiers.process_commands()
 
         # 1. Fetch from all sources
@@ -70,9 +89,7 @@ class RentBuster:
 
         if not all_listings:
             log.info("no listings returned from any source")
-            if self.db and not self.dry_run:
-                self.db.log_scrape_run("all", 0, 0, 0, "no listings")
-            return
+            return 0, 0, 0, "no listings"
 
         # 2. Apply profile filters (rooms, property type)
         before = len(all_listings)
@@ -105,7 +122,7 @@ class RentBuster:
                 for src, ids in by_source.items():
                     self.db.touch_listings(src, ids)
                 self.db.mark_disappeared()
-            return
+            return len(all_listings), 0, 0, None
 
         # 5. WOZ lookup (check DB cache first)
         need_woz = [ls for ls in new_listings if not (ls.woz_value and ls.woz_verified)]
@@ -203,16 +220,16 @@ class RentBuster:
         # 10. Cleanup
         if self.db and not self.dry_run:
             self.db.mark_disappeared()
-            self.db.log_scrape_run("all", len(all_listings), len(new_listings), len(bustable))
 
-        # Write heartbeat for Docker HEALTHCHECK
+        return len(all_listings), len(new_listings), len(bustable), None
+
+    @staticmethod
+    def _touch_heartbeat() -> None:
         try:
-            import time as _time
-
-            with open("/tmp/rentbuster_last_run", "w") as _f:
-                _f.write(str(int(_time.time())))
-        except Exception:
-            pass
+            with open(HEARTBEAT_PATH, "w") as f:
+                f.write(str(int(time.time())))
+        except OSError as exc:
+            log.debug("could not write heartbeat file: %s", exc)
 
     def _apply_search_filters(self, listings: list[Listing]) -> list[Listing]:
         search = self.profile.search
