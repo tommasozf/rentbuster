@@ -149,6 +149,11 @@ class DiscordNotifier:
     def __init__(self, webhook_url: str) -> None:
         self.webhook_url = webhook_url
 
+    def send_text(self, text: str) -> None:
+        resp = DiscordWebhook(url=self.webhook_url, content=_truncate(text, 2000)).execute()
+        if resp.status_code not in (200, 204):
+            log.warning("discord text message failed: %s", resp.status_code)
+
     def send_listings(self, listings: list[Listing]) -> None:
         if not listings:
             return

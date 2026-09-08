@@ -15,19 +15,29 @@ class AppriseNotifier:
     def __init__(self, urls: str) -> None:
         self.urls = [u.strip() for u in urls.split(",") if u.strip()]
 
-    def send_listings(self, listings: list[Listing]) -> None:
-        if not listings:
-            return
-
+    def _client(self):
         try:
             import apprise
         except ImportError:
             log.error("apprise package not installed")
-            return
-
+            return None
         ap = apprise.Apprise()
         for url in self.urls:
             ap.add(url)
+        return ap
+
+    def send_text(self, text: str) -> None:
+        ap = self._client()
+        if ap is not None:
+            ap.notify(title="RentBuster", body=text)
+
+    def send_listings(self, listings: list[Listing]) -> None:
+        if not listings:
+            return
+
+        ap = self._client()
+        if ap is None:
+            return
 
         for listing in listings:
             title, body = self._format_listing(listing)

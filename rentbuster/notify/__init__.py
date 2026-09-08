@@ -45,6 +45,17 @@ class NotifierBundle:
             except Exception as exc:
                 log.error("%s notifier failed: %s", notifier.name, exc)
 
+    def send_text(self, text: str) -> None:
+        """Send a plain status message (e.g. on startup) to every channel that supports it."""
+        for notifier in self.notifiers:
+            handler = getattr(notifier, "send_text", None)
+            if not callable(handler):
+                continue
+            try:
+                handler(text)
+            except Exception as exc:
+                log.error("%s notifier failed to send text: %s", notifier.name, exc)
+
     def process_commands(self) -> None:
         for notifier in self.notifiers:
             handler = getattr(notifier, "process_commands", None)
