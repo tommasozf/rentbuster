@@ -4,11 +4,6 @@
 #   cp .env.example .env   # fill in API keys / webhooks
 #   docker compose up -d   # starts db + rentbuster (schema is created automatically)
 #   docker compose logs -f rentbuster
-#
-# With dashboard: docker compose --profile dashboard up -d
-#
-# The dashboard is bound to 127.0.0.1 by default so it is NOT reachable from the public
-# internet even if you expose the host. Wrap in a reverse proxy with auth for remote access.
 
 services:
   db:
@@ -40,20 +35,6 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-rentbuster}:${POSTGRES_PASSWORD:-rentbuster}@db:5432/${POSTGRES_DB:-rentbuster}
     # Chromium needs more than Docker's 64MB default /dev/shm or it crashes with OOM errors.
     shm_size: 2g
-
-  dashboard:
-    profiles: [dashboard]
-    build:
-      context: ./dashboard
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-rentbuster}:${POSTGRES_PASSWORD:-rentbuster}@db:5432/${POSTGRES_DB:-rentbuster}
-      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
-    ports:
-      - "127.0.0.1:3000:3000"
 
 volumes:
   rentbuster-db:

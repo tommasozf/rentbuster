@@ -2,7 +2,7 @@
 
 Scrapes Pararius and rent-buster.nl for Amsterdam (or any Dutch city) rental listings, calculates the legal maximum rent using the WWS (Woningwaarderingsstelsel) points system, and sends you a notification whenever a listing is asking more than it's legally allowed to.
 
-No AI, no paid APIs, no subscriptions. Everything runs free.
+No paid APIs, no subscriptions. The only optional paid piece is a Gemini call per new listing to read the ad text, which costs cents per month.
 
 ---
 
@@ -36,6 +36,7 @@ That's it. Postgres, Playwright, Chromium — all bundled. See [DEPLOY.md](DEPLO
 
 ```bash
 docker compose run --rm rentbuster run --once --dry-run
+docker compose run --rm rentbuster -v run --once --dry-run   # debug logging; -v goes before the subcommand
 ```
 
 ---
@@ -99,7 +100,12 @@ Once the scraper is running, open your bot in Telegram and send:
 **Available commands:**
 - `/start <password>` — subscribe to alerts
 - `/stop` — unsubscribe
-- `/top` or `/top 10` — show the top bustable listings from the database
+- `/list` or `/list 10` (alias `/top`) — top bustable listings from the database
+- `/detail <id>` — full details and WWS breakdown for one listing
+- `/drop <id>` — hide a listing from your future alerts
+- `/status` — last run time and listing counts
+- `/filters` — the active search profile
+- `/help` — list the commands
 
 ### Apprise (ntfy, Pushover, Slack, email, etc.)
 
@@ -121,6 +127,7 @@ APPRISE_URLS=ntfy://mytopic,pover://UserKey@AppKey
 ## Configuration
 
 Copy `.env.example` to `.env` and set what you need. Without a notification URL it just logs to stdout.
+Search settings (city, rent ceiling, rooms, pages, minimum savings) are in the profile, see below.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -130,8 +137,7 @@ Copy `.env.example` to `.env` and set what you need. Without a notification URL 
 | `PLAYWRIGHT_HEADLESS` | `true` | Set `false` to watch the browser |
 | `FETCH_DETAILS` | `true` | Visit each listing's detail page for energy label etc. |
 | `RENTBUSTER_NL_ENABLED` | `true` | Scrape rent-buster.nl (HTTP-based, faster) |
-| `WWS_BUSTABLE_ONLY` | `true` | Only notify on bustable listings |
-| `WWS_MIN_SAVINGS` | `50` | Minimum EUR/month savings to trigger a notification |
+| `DETAIL_FETCH_DELAY` | `2.0` | Seconds to wait between Pararius detail pages |
 | `DISCORD_WEBHOOK_URL` | — | Discord webhook URL |
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot token (from @BotFather) |
 | `TELEGRAM_PASSWORD` | — | Password users send with `/start` to subscribe |

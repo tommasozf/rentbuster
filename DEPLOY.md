@@ -62,8 +62,6 @@ layer) and needs a couple GB of RAM headroom for the browser. A good cheap optio
 - [ ] `.env` is `chmod 600` and never committed (`.gitignore` already covers it)
 - [ ] Postgres port is bound to `127.0.0.1` only (already the case in `docker-compose.yml`) —
       don't change this unless you know what you're doing
-- [ ] Dashboard (`--profile dashboard`) is bound to `127.0.0.1` — access it via SSH tunnel
-      (`ssh -L 3000:localhost:3000 user@server`) or a reverse proxy with auth, never exposed raw
 
 ## Restart on reboot
 
