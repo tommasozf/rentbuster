@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from rentbuster.models import EnergyLabel
 from rentbuster.sources.pararius import (
+    ParariusSource,
     _extract_postal_code,
     _parse_address,
     _parse_area,
@@ -103,3 +104,35 @@ class TestParseAddress:
         prop_type, street, num, add = _parse_address("")
         assert street == ""
         assert num == ""
+
+
+class TestDetailCandidates:
+    def _listing(self, sid, rooms=2, ptype="apartment"):
+        from rentbuster.models import Listing, Source
+
+        return Listing(source=Source.PARARIUS, source_id=sid, url="u", num_rooms=rooms, property_type=ptype)
+
+    def test_known_and_filtered_listings_are_skipped(self):
+        src = ParariusSource(max_rooms=3, property_types=["apartment"], skip_detail_ids={"known"})
+        listings = [
+            self._listing("known"),
+            self._listing("too-big", rooms=5),
+            self._listing("house", ptype="house"),
+            self._listing("new"),
+        ]
+        candidates, known, filtered = src._select_detail_candidates(listings)
+        assert [ls.source_id for ls in candidates] == ["new"]
+        assert known == 1
+        assert filtered == 2
+
+    def test_build_sources_passes_pararius_ids_only(self):
+        from rentbuster.config import Settings
+        from rentbuster.profile import load_profile
+        from rentbuster.sources import build_sources
+
+        settings = Settings(_env_file=None, rentbuster_nl_enabled=False)
+        sources = build_sources(
+            settings, load_profile("amsterdam"), seen_ids={("pararius", "a"), ("funda", "b")}
+        )
+        assert isinstance(sources[0], ParariusSource)
+        assert sources[0].skip_detail_ids == {"a"}

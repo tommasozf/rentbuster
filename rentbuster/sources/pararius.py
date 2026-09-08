@@ -144,6 +144,7 @@ class ParariusSource:
         headless: bool = True,
         detail_delay: float = 2.0,
         fetch_details: bool = True,
+        skip_detail_ids: set[str] | None = None,
     ) -> None:
         self.city = city.lower()
         self.max_rent = max_rent
@@ -154,6 +155,8 @@ class ParariusSource:
         self.headless = headless
         self.detail_delay = detail_delay
         self.fetch_details = fetch_details
+        # Listings the caller already knows (from the DB); their detail page is not re-fetched.
+        self.skip_detail_ids: set[str] = skip_detail_ids or set()
         self._browser = None
         self._playwright = None
 
@@ -202,9 +205,14 @@ class ParariusSource:
         "checking your browser",
     )
 
-    async def _fresh_page(self, url: str) -> tuple:
+    _SEARCH_READY = "li.search-list__item--listing"
+    _DETAIL_READY = ".listing-detail-summary__location, .listing-detail-summary"
+
+    async def _fresh_page(self, url: str, wait_for: str = _SEARCH_READY) -> tuple:
         """Open url in a fresh browser context (bypasses Cloudflare per-session limits).
 
+        ``wait_for`` is the selector that marks the page as loaded: listing cards on a search
+        page, the address summary on a detail page.
         Returns (context, page) — caller must close the context when done.
         """
         await self._ensure_browser()
@@ -221,11 +229,11 @@ class ParariusSource:
         page.set_default_timeout(30_000)
         try:
             await page.goto(url, wait_until="domcontentloaded")
-            # Wait for either listing cards to appear or Cloudflare to clear
+            # Wait for either the content to appear or Cloudflare to clear
             for attempt in range(15):
-                cards = await page.query_selector_all("li.search-list__item--listing")
-                if cards:
-                    log.debug("pararius: content ready (%d cards) after ~%ds", len(cards), attempt * 2)
+                ready = await page.query_selector_all(wait_for)
+                if ready:
+                    log.debug("pararius: content ready (%d nodes) after ~%ds", len(ready), attempt * 2)
                     break
                 if await self._is_cloudflare_challenge(page):
                     log.debug("pararius: Cloudflare challenge detected, waiting...")
@@ -310,21 +318,31 @@ class ParariusSource:
                 await asyncio.sleep(random.uniform(2.0, 5.0))
 
         if self.fetch_details and listings:
-            detail_candidates = [ls for ls in listings if self._worth_detail_fetch(ls)]
-            skipped = len(listings) - len(detail_candidates)
-            if skipped:
-                log.info(
-                    "pararius: skipped %d listings (filters), fetching details for %d (5 parallel)",
-                    skipped,
-                    len(detail_candidates),
-                )
-            else:
-                log.info("pararius: fetching details for %d listings (5 parallel)", len(detail_candidates))
+            detail_candidates, known, filtered = self._select_detail_candidates(listings)
+            log.info(
+                "pararius: fetching details for %d listings (5 parallel; %d already known, %d filtered out)",
+                len(detail_candidates),
+                known,
+                filtered,
+            )
             sem = asyncio.Semaphore(5)
             tasks = [self._fetch_detail(ls, sem) for ls in detail_candidates]
             await asyncio.gather(*tasks)
 
         return listings
+
+    def _select_detail_candidates(self, listings: list[Listing]) -> tuple[list[Listing], int, int]:
+        """Return (listings to fetch details for, nr skipped as known, nr skipped by filters)."""
+        candidates: list[Listing] = []
+        known = filtered = 0
+        for ls in listings:
+            if ls.source_id in self.skip_detail_ids:
+                known += 1
+            elif not self._worth_detail_fetch(ls):
+                filtered += 1
+            else:
+                candidates.append(ls)
+        return candidates, known, filtered
 
     def _worth_detail_fetch(self, listing: Listing) -> bool:
         if self.property_types and listing.property_type not in self.property_types:
@@ -450,13 +468,15 @@ class ParariusSource:
 
     async def _fetch_detail(self, listing: Listing, sem: asyncio.Semaphore) -> None:
         async with sem:
-            ctx, page = await self._fresh_page(listing.url)
+            ctx, page = await self._fresh_page(listing.url, wait_for=self._DETAIL_READY)
             try:
                 await self._parse_detail_page(page, listing)
             except Exception as exc:
                 log.warning("pararius: detail fetch failed for %s: %s", listing.source_id, exc)
             finally:
                 await ctx.close()
+            if self.detail_delay > 0:
+                await asyncio.sleep(self.detail_delay)
 
     async def _parse_detail_page(self, page, listing: Listing) -> None:
         # Postal code + neighborhood from detail — verified: .listing-detail-summary__location
