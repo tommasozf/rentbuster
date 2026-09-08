@@ -216,11 +216,12 @@ class RentBuster:
 
     def _apply_search_filters(self, listings: list[Listing]) -> list[Listing]:
         search = self.profile.search
+        allowed_types = {t.lower() for t in search.property_types}
         result = []
         for ls in listings:
             if search.max_rooms and ls.num_rooms > search.max_rooms:
                 continue
-            if search.property_types and ls.property_type and ls.property_type not in search.property_types:
+            if allowed_types and ls.property_type and ls.property_type.lower() not in allowed_types:
                 continue
             if search.must_allow_students and ls.suitable_for_students is False:
                 continue
