@@ -245,6 +245,29 @@ class Database:
             log.warning("remove subscriber failed: %s", exc)
             return False
 
+    # ── App state ──
+
+    def get_state(self, key: str) -> str | None:
+        try:
+            with self._cursor() as cur:
+                cur.execute("SELECT value FROM app_state WHERE key = %s", (key,))
+                row = cur.fetchone()
+                return row[0] if row else None
+        except Exception as exc:
+            log.warning("get_state failed: %s", exc)
+            return None
+
+    def set_state(self, key: str, value: str) -> None:
+        try:
+            with self._cursor() as cur:
+                cur.execute(
+                    "INSERT INTO app_state (key, value) VALUES (%s, %s) "
+                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()",
+                    (key, value),
+                )
+        except Exception as exc:
+            log.warning("set_state failed: %s", exc)
+
     # ── Top listings ──
 
     def get_top_listings(self, limit: int = 5) -> list[dict]:
@@ -384,6 +407,11 @@ class Database:
             "ALTER TABLE listings ADD COLUMN IF NOT EXISTS suitable_for_sharing BOOLEAN",
             "ALTER TABLE listings ADD COLUMN IF NOT EXISTS guarantor_accepted BOOLEAN",
             "ALTER TABLE listings ADD COLUMN IF NOT EXISTS rb_points REAL",
+            (
+                "CREATE TABLE IF NOT EXISTS app_state ("
+                "  key TEXT PRIMARY KEY, value TEXT,"
+                "  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())"
+            ),
             (
                 "CREATE TABLE IF NOT EXISTS dropped_listings ("
                 "  chat_id BIGINT NOT NULL, source TEXT NOT NULL, source_id TEXT NOT NULL,"

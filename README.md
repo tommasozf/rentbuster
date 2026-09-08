@@ -97,6 +97,8 @@ Once the scraper is running, open your bot in Telegram and send:
 /start somesecretword
 ```
 
+The bot answers within a few seconds while the scraper runs (it long-polls Telegram in the background); with `run --once` commands are handled once at the start of the run.
+
 **Available commands:**
 - `/start <password>` — subscribe to alerts
 - `/stop` — unsubscribe

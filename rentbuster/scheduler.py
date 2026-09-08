@@ -291,6 +291,7 @@ class RentBuster:
 
     def run_forever(self) -> None:
         self._print_banner()
+        self.notifiers.start_background()
         if not self.dry_run and self.notifiers.active:
             self.notifiers.send_text(self._startup_message())
         while True:

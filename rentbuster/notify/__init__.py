@@ -56,6 +56,16 @@ class NotifierBundle:
             except Exception as exc:
                 log.error("%s notifier failed to send text: %s", notifier.name, exc)
 
+    def start_background(self) -> None:
+        """Start whatever a notifier wants running between scrape cycles (Telegram polling)."""
+        for notifier in self.notifiers:
+            starter = getattr(notifier, "start_polling", None)
+            if callable(starter):
+                try:
+                    starter()
+                except Exception as exc:
+                    log.error("%s could not start polling: %s", notifier.name, exc)
+
     def process_commands(self) -> None:
         for notifier in self.notifiers:
             handler = getattr(notifier, "process_commands", None)
