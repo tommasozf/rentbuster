@@ -13,12 +13,12 @@ from rentbuster.config import Settings
 from rentbuster.db import Database
 from rentbuster.dedup import deduplicate
 from rentbuster.llm import LLMExtraction, extract_batch
-from rentbuster.models import Listing
+from rentbuster.models import ConfidenceLevel, Listing
 from rentbuster.notify import NotifierBundle
 from rentbuster.profile import Profile
 from rentbuster.sources import build_sources
 from rentbuster.woz import lookup_woz
-from rentbuster.wws import calculate_wws, rb_agrees
+from rentbuster.wws import LIBERALIZATION_THRESHOLD, calculate_wws, rb_agrees
 
 log = logging.getLogger(__name__)
 
@@ -165,8 +165,11 @@ class RentBuster:
 
         # 7. Calculate WWS points
         for listing in new_listings:
-            key = f"{listing.source.value}:{listing.source_id}"
-            calculate_wws(listing, llm_extraction=extractions.get(key), defaults=self.profile.wws)
+            if listing.rb_points is not None and listing.rb_estimated_max_rent is not None:
+                self._apply_rb_points(listing)
+            else:
+                key = f"{listing.source.value}:{listing.source_id}"
+                calculate_wws(listing, llm_extraction=extractions.get(key), defaults=self.profile.wws)
             log.debug(
                 "  %s %s — %s pts → €%s/mo (bustable=%s)",
                 listing.street,
@@ -240,6 +243,24 @@ class RentBuster:
             )
             return False
         return True
+
+    @staticmethod
+    def _apply_rb_points(listing: Listing) -> None:
+        """Use rent-buster.nl's own WWS score instead of recalculating.
+
+        rent-buster.nl has cadastral data (build year, monument status, region) that we
+        lack, so their points are more accurate than our defaults.
+        """
+        listing.wws_points = listing.rb_points
+        listing.wws_max_rent = listing.rb_estimated_max_rent
+        is_regulated = listing.rb_points < LIBERALIZATION_THRESHOLD
+        is_bustable = is_regulated and listing.asking_rent > listing.rb_estimated_max_rent
+        listing.wws_is_bustable = is_bustable
+        listing.wws_savings = round(listing.asking_rent - listing.rb_estimated_max_rent, 2) if is_bustable else None
+        listing.wws_confidence = ConfidenceLevel.HIGH
+        listing.wws_flags = ["rb_points_used"]
+        listing.bust_score = round((listing.wws_savings or 0) * 1.0, 2)
+        log.debug("  using rent-buster.nl points for %s %s", listing.street, listing.house_number)
 
     def _apply_search_filters(self, listings: list[Listing]) -> list[Listing]:
         search = self.profile.search

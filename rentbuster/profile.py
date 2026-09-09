@@ -18,9 +18,9 @@ class WWSConfig:
     # Only alert when rent-buster.nl's own calculation also says the ad is bustable
     # (listings without rent-buster.nl data are unaffected).
     require_rb_agreement: bool = False
-    default_outdoor_points: float = -5.0
-    default_kitchen_points: float = 4.0
-    default_bathroom_points: float = 8.0
+    default_outdoor_points: float = 2.0
+    default_kitchen_points: float = 10.0
+    default_bathroom_points: float = 12.0
     default_heating_points: float = 2.0  # per heated room
 
     @classmethod
@@ -29,9 +29,9 @@ class WWSConfig:
             bustable_only=bool(data.get("bustable_only", True)),
             min_savings=int(data.get("min_savings", 50)),
             require_rb_agreement=bool(data.get("require_rb_agreement", False)),
-            default_outdoor_points=float(data.get("default_outdoor_points", -5.0)),
-            default_kitchen_points=float(data.get("default_kitchen_points", 4.0)),
-            default_bathroom_points=float(data.get("default_bathroom_points", 8.0)),
+            default_outdoor_points=float(data.get("default_outdoor_points", 2.0)),
+            default_kitchen_points=float(data.get("default_kitchen_points", 10.0)),
+            default_bathroom_points=float(data.get("default_bathroom_points", 12.0)),
             default_heating_points=float(data.get("default_heating_points", 2.0)),
         )
 

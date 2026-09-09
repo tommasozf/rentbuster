@@ -46,4 +46,4 @@ def test_wws_config_defaults():
     wws = WWSConfig.from_dict({})
     assert wws.bustable_only is True
     assert wws.min_savings == 50
-    assert wws.default_outdoor_points < 0
+    assert wws.default_outdoor_points == 2.0

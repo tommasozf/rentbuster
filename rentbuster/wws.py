@@ -53,15 +53,15 @@ WOZ_MAX_PERCENTAGE = 0.33
 WOZ_CAP_FLOOR_POINTS = 186
 _NEWBUILD_EXCEPTION_CITIES = {"amsterdam", "utrecht"}
 
-# Defaults when the ad gives no detail. These are the lowest values a normal home can score
-# under the 2026 rules, so they stay conservative without being impossible:
-#   outdoor  -5   no private or shared outdoor space (the penalty the rules apply)
-#   kitchen   4   counter of 1-2 m, no extras
-#   bathroom  8   toilet 3 + shower 4 + washbasin 1
-#   heating   2   per heated room (rubriek 3), multiplied by the room count
-DEFAULT_OUTDOOR_POINTS = -5.0
-DEFAULT_KITCHEN_POINTS = 4.0
-DEFAULT_BATHROOM_POINTS = 8.0
+# Defaults when the ad gives no detail. Calibrated against rent-buster.nl's scoring of the
+# same listings (they use cadastral data); these represent a standard Amsterdam apartment:
+#   outdoor   2   presence bonus only (most apartments have at least a small balcony)
+#   kitchen  10   counter 4 + faucet 1 + drain 1 + cooker 4 (standard fitted kitchen)
+#   bathroom 12   toilet 3 + shower 4 + basin 1 + bathtub 3 + mirror 0.5 + outlet 0.5
+#   heating   2   per heated room (rubriek 8), multiplied by the room count
+DEFAULT_OUTDOOR_POINTS = 2.0
+DEFAULT_KITCHEN_POINTS = 10.0
+DEFAULT_BATHROOM_POINTS = 12.0
 DEFAULT_HEATING_POINTS_PER_ROOM = 2.0
 
 # Bijlage 3 — maximale huurprijsgrenzen (Huurcommissie), loaded from rentbuster/data/huurprijsgrenzen.json.

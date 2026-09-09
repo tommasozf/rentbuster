@@ -97,9 +97,9 @@ class TestWWSWithLLMExtraction:
         listing = _make_listing()
         bd = calculate_wws(listing, llm_extraction=None)
 
-        assert bd.outdoor_space == -5.0
-        assert bd.kitchen == 4.0
-        assert bd.bathroom == 8.0
+        assert bd.outdoor_space == 2.0
+        assert bd.kitchen == 10.0
+        assert bd.bathroom == 12.0
         assert bd.heating == 2.0 * max(listing.num_rooms, 1)
         assert "outdoor_space_assumed_none" in bd.flags
         assert "llm_extracted" not in bd.flags

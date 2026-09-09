@@ -15,8 +15,8 @@ wws:
   bustable_only: true
   min_savings: 50
   require_rb_agreement: false   # true = only alert when rent-buster.nl also calls it bustable
-  # Used when the ad gives no detail (and no LLM extraction). Minimums under the 2026 rules:
-  default_outdoor_points: -5      # no outdoor space at all
-  default_kitchen_points: 4       # counter 1-2 m
-  default_bathroom_points: 8      # toilet 3 + shower 4 + washbasin 1
+  # Used when the ad gives no detail (and no LLM extraction). Standard Amsterdam apartment:
+  default_outdoor_points: 2       # presence bonus (most apartments have a small balcony)
+  default_kitchen_points: 10      # counter 4 + faucet 1 + drain 1 + cooker 4
+  default_bathroom_points: 12     # toilet 3 + shower 4 + basin 1 + bath 3 + extras 1
   default_heating_points: 2       # per heated room
