@@ -529,6 +529,18 @@ class ParariusSource:
             elif any(kw in key for kw in ("garant", "borg", "guarantor")):
                 listing.guarantor_accepted = _parse_yes_no(val.lower())
 
+        # JS fallback for energy label (Platform.targeting.energylabel is often
+        # present even when the dt/dd table is missing or the key text differs).
+        if not listing.energy_label:
+            try:
+                js_label = await page.evaluate(
+                    "() => { try { return Platform.targeting.energylabel || null; } catch(e) { return null; } }"
+                )
+                if js_label:
+                    listing.energy_label = _parse_energy_label(js_label)
+            except Exception:
+                pass
+
         # Description — verified: [class*=description]
         desc_el = await page.query_selector("[class*=description] p, [class*=description]")
         if desc_el and not listing.description:

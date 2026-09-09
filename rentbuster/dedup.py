@@ -48,11 +48,13 @@ def deduplicate(listings: list[Listing]) -> list[Listing]:
             if incoming_priority > existing_priority:
                 # Incoming has higher priority — promote it and carry rb fields
                 _merge_rb_fields(listing, existing)
+                _fill_missing(listing, existing)
                 seen[key] = listing
                 result[result.index(existing)] = listing
             elif incoming_priority < existing_priority:
                 # Existing has higher priority — enrich it with rb cross-ref data
                 _merge_rb_fields(existing, listing)
+                _fill_missing(existing, listing)
             else:
                 # Same source duplicate — fill any missing fields from the duplicate
                 _fill_missing(existing, listing)
