@@ -256,7 +256,9 @@ class RentBuster:
         is_regulated = listing.rb_points < LIBERALIZATION_THRESHOLD
         is_bustable = is_regulated and listing.asking_rent > listing.rb_estimated_max_rent
         listing.wws_is_bustable = is_bustable
-        listing.wws_savings = round(listing.asking_rent - listing.rb_estimated_max_rent, 2) if is_bustable else None
+        listing.wws_savings = (
+            round(listing.asking_rent - listing.rb_estimated_max_rent, 2) if is_bustable else None
+        )
         listing.wws_confidence = ConfidenceLevel.HIGH
         listing.wws_flags = ["rb_points_used"]
         listing.bust_score = round((listing.wws_savings or 0) * 1.0, 2)

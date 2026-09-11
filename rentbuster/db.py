@@ -51,6 +51,11 @@ INSERT INTO listings (
 )
 ON CONFLICT (source, source_id) DO UPDATE SET
     asking_rent         = EXCLUDED.asking_rent,
+    surface_area_m2     = COALESCE(EXCLUDED.surface_area_m2, listings.surface_area_m2),
+    num_rooms           = COALESCE(EXCLUDED.num_rooms, listings.num_rooms),
+    energy_label        = COALESCE(EXCLUDED.energy_label, listings.energy_label),
+    construction_year   = COALESCE(EXCLUDED.construction_year, listings.construction_year),
+    description         = COALESCE(EXCLUDED.description, listings.description),
     wws_points          = EXCLUDED.wws_points,
     wws_max_rent        = EXCLUDED.wws_max_rent,
     wws_savings         = EXCLUDED.wws_savings,
