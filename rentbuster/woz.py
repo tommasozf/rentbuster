@@ -170,10 +170,10 @@ def lookup_woz_kadaster(
     return None
 
 
-def estimate_woz(city: str, surface_area_m2: int) -> WOZResult:
+def estimate_woz(city: str, surface_area_m2: int, per_m2_override: int | None = None) -> WOZResult:
     """Conservative WOZ estimate when Kadaster lookup is unavailable."""
     city_key = (city or "").lower().strip()
-    per_m2 = WOZ_ESTIMATE_PER_M2.get(city_key, WOZ_ESTIMATE_DEFAULT)
+    per_m2 = per_m2_override or WOZ_ESTIMATE_PER_M2.get(city_key, WOZ_ESTIMATE_DEFAULT)
     m2 = surface_area_m2 or 50
     return WOZResult(
         value=m2 * per_m2,
@@ -193,7 +193,7 @@ def _get_session() -> requests.Session:
     return _shared_session
 
 
-def lookup_woz(listing: Listing) -> WOZResult:
+def lookup_woz(listing: Listing, per_m2_override: int | None = None) -> WOZResult:
     """Resolve WOZ value for a listing; mutates listing WOZ fields.
 
     If listing already has a woz_value (e.g. from rent-buster.nl), skips lookup.
@@ -220,7 +220,7 @@ def lookup_woz(listing: Listing) -> WOZResult:
         )
 
     if result is None:
-        result = estimate_woz(listing.city, listing.surface_area_m2)
+        result = estimate_woz(listing.city, listing.surface_area_m2, per_m2_override)
 
     listing.woz_value = result.value
     listing.woz_reference_date = result.reference_date

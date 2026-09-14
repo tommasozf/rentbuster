@@ -219,6 +219,7 @@ class RentBuster:
         # 10. Cleanup
         if self.db and not self.dry_run:
             self.db.mark_disappeared()
+            self.db.purge_old_listings(self.profile.wws.retention_days)
 
         return len(all_listings), len(new_listings), len(bustable), None
 
@@ -230,8 +231,28 @@ class RentBuster:
         except OSError as exc:
             log.debug("could not write heartbeat file: %s", exc)
 
+    _CONFIDENCE_RANK = {"VERY_LOW": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3}
+
     def _worth_alerting(self, listing: Listing) -> bool:
         if not listing.wws_is_bustable or (listing.wws_savings or 0) < self.profile.wws.min_savings:
+            return False
+        min_conf = self.profile.wws.min_confidence
+        if min_conf and listing.wws_confidence:
+            listing_rank = self._CONFIDENCE_RANK.get(listing.wws_confidence.value, 0)
+            min_rank = self._CONFIDENCE_RANK.get(min_conf, 0)
+            if listing_rank < min_rank:
+                log.info(
+                    "  skipped %s %s: confidence %s below minimum %s",
+                    listing.street, listing.house_number,
+                    listing.wws_confidence.value, min_conf,
+                )
+                return False
+        if self.profile.wws.min_bust_score and listing.bust_score < self.profile.wws.min_bust_score:
+            log.info(
+                "  skipped %s %s: bust_score %.0f below minimum %.0f",
+                listing.street, listing.house_number,
+                listing.bust_score, self.profile.wws.min_bust_score,
+            )
             return False
         if self.profile.wws.require_rb_agreement and not rb_agrees(listing):
             log.info(
@@ -298,7 +319,7 @@ class RentBuster:
                 listing._woz_source = cached.get("source", "")  # type: ignore[attr-defined]
                 return
 
-        result = lookup_woz(listing)
+        result = lookup_woz(listing, per_m2_override=self.profile.wws.default_woz_per_m2)
 
         # Cache the result
         if self.db and listing.postal_code and listing.house_number:

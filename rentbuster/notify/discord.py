@@ -96,7 +96,14 @@ def format_listing(listing: Listing) -> DiscordEmbed:
             woz_info = f"WOZ €{listing.woz_value:,}"
     else:
         woz_info = "⚠️ WOZ ESTIMATED"
-    embed.add_embed_field(name="⚡ Energy / WOZ", value=f"{energy} • {woz_info}", inline=True)
+    energy_woz = f"{energy} • {woz_info}"
+    bd = listing.wws_breakdown or {}
+    if bd.get("points_if_label_a") is not None:
+        a_pts = bd["points_if_label_a"]
+        a_rent = bd["max_rent_if_label_a"]
+        regulated = "regulated" if a_pts < 187 else "free market"
+        energy_woz += f"\nIf label A: {a_pts:.0f} pts → €{a_rent:.0f}/mo ({regulated})"
+    embed.add_embed_field(name="⚡ Energy / WOZ", value=energy_woz, inline=True)
 
     conf_emoji = _confidence_emoji(listing)
     embed.add_embed_field(

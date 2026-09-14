@@ -151,6 +151,26 @@ class Database:
             log.warning("mark disappeared failed: %s", exc)
             return 0
 
+    def purge_old_listings(self, days: int = 90) -> int:
+        """Delete listings that disappeared more than `days` ago."""
+        if days <= 0:
+            return 0
+        try:
+            with self._cursor() as cur:
+                cur.execute(
+                    "DELETE FROM listings "
+                    "WHERE disappeared_at IS NOT NULL "
+                    "  AND disappeared_at < NOW() - make_interval(days => %s)",
+                    (days,),
+                )
+                count = cur.rowcount or 0
+                if count:
+                    log.info("purged %d listings older than %d days", count, days)
+                return count
+        except Exception as exc:
+            log.warning("purge_old_listings failed: %s", exc)
+            return 0
+
     # ── WOZ cache ──
 
     def get_cached_woz(self, postal_code: str, house_number: str, addition: str) -> dict | None:

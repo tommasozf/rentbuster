@@ -432,6 +432,14 @@ class TelegramNotifier:
                 rb_line += f", max €{listing.rb_estimated_max_rent:.0f}/mo"
             rb_line += "\n"
 
+        label_a_line = ""
+        bd = listing.wws_breakdown or {}
+        if bd.get("points_if_label_a") is not None:
+            a_pts = bd["points_if_label_a"]
+            a_rent = bd["max_rent_if_label_a"]
+            regulated = "regulated" if a_pts < 187 else "free market"
+            label_a_line = f"💡 If label A: {a_pts:.0f} pts → €{a_rent:.0f}/mo ({regulated})\n"
+
         return (
             f"🏠 <b>Bustable listing found!</b>\n\n"
             f"📍 <b>{address}, {city}</b>\n"
@@ -439,6 +447,7 @@ class TelegramNotifier:
             f"⚖️ Max legal ({points:.0f} pts): €{max_rent:.0f}/mo\n"
             f"💸 <b>Savings: €{savings:.0f}/mo (€{savings * 12:.0f}/yr)</b>\n\n"
             f"📐 {size_info}  |  ⚡ Label {energy}  |  {woz_str}\n"
+            f"{label_a_line}"
             f"📊 Confidence: {conf}{estimated_footer}\n"
             f"{rb_line}\n"
             f"⚠️ Verify with Huurcommissie before disputing\n"

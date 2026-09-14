@@ -117,6 +117,8 @@ class WWSBreakdown:
     kitchen: float = 0.0
     bathroom: float = 0.0
     heating: float = 0.0
+    points_if_label_a: float | None = None
+    max_rent_if_label_a: float | None = None
     flags: list[str] = field(default_factory=list)
 
     @property
@@ -133,7 +135,7 @@ class WWSBreakdown:
         )
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "surface_area": self.surface_area,
             "energy_label": self.energy_label,
             "woz_uncapped": self.woz_uncapped,
@@ -145,6 +147,10 @@ class WWSBreakdown:
             "heating": self.heating,
             "total": self.total,
         }
+        if self.points_if_label_a is not None:
+            d["points_if_label_a"] = self.points_if_label_a
+            d["max_rent_if_label_a"] = self.max_rent_if_label_a
+        return d
 
 
 # ── rent-buster.nl cross-check ─────────────────────────────────────────────────
@@ -194,6 +200,8 @@ def calculate_wws(
     d_kitchen = defaults.default_kitchen_points if defaults else DEFAULT_KITCHEN_POINTS
     d_bathroom = defaults.default_bathroom_points if defaults else DEFAULT_BATHROOM_POINTS
     d_heating = defaults.default_heating_points if defaults else DEFAULT_HEATING_POINTS_PER_ROOM
+    d_energy_label = defaults.default_energy_label if defaults else "D"
+    d_woz_per_m2 = defaults.default_woz_per_m2 if defaults else WOZ_ESTIMATE_DEFAULT
 
     # 1. Surface area — 1 point per m²
     if listing.surface_area_m2 and listing.surface_area_m2 > 0:
@@ -206,8 +214,8 @@ def calculate_wws(
     if listing.energy_label:
         bd.energy_label = ENERGY_POINTS_APARTMENT.get(listing.energy_label.value, 11.0)
     else:
-        bd.energy_label = ENERGY_POINTS_APARTMENT["D"]
-        flags.append("energy_label_unknown_assumed_D")
+        bd.energy_label = ENERGY_POINTS_APARTMENT.get(d_energy_label, 11.0)
+        flags.append(f"energy_label_unknown_assumed_{d_energy_label}")
 
     # 3. WOZ value — two-part formula (the cap is applied after the other components are known)
     city_key = (listing.city or "").lower().strip()
@@ -220,8 +228,7 @@ def calculate_wws(
             flags.append("woz_sibling")
     else:
         m2 = listing.surface_area_m2 or 50
-        per_m2 = WOZ_ESTIMATE_PER_M2.get(city_key, WOZ_ESTIMATE_DEFAULT)
-        woz = m2 * per_m2
+        woz = m2 * d_woz_per_m2
         flags.append("woz_estimated_conservative")
 
     if woz < WOZ_MINIMUM_VALUE:
@@ -273,6 +280,24 @@ def calculate_wws(
                     flags.append("woz_cap_floor_186")
 
     bd.flags = flags
+
+    # When the energy label is unknown, also compute a "what if label A" scenario so the
+    # user can see whether the listing is still bustable with a good label.
+    if "energy_label_unknown_assumed_D" in flags:
+        label_a_pts = ENERGY_POINTS_APARTMENT["A"]
+        delta = label_a_pts - bd.energy_label
+        alt_subtotal = (
+            bd.surface_area + label_a_pts + bd.outdoor_space + bd.kitchen + bd.bathroom + bd.heating
+        )
+        alt_woz = bd.woz_uncapped
+        alt_total_uncapped = alt_subtotal + alt_woz
+        if alt_total_uncapped >= LIBERALIZATION_THRESHOLD:
+            max_woz = (WOZ_MAX_PERCENTAGE / (1 - WOZ_MAX_PERCENTAGE)) * alt_subtotal
+            if alt_woz > max_woz:
+                alt_woz = float(math.floor(max_woz))
+        alt_total = alt_subtotal + alt_woz
+        bd.points_if_label_a = round(alt_total, 2)
+        bd.max_rent_if_label_a = points_to_max_rent(alt_total)
 
     total = bd.total
     max_rent = points_to_max_rent(total)

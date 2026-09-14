@@ -1,5 +1,6 @@
 name: amsterdam
 description: Find bustable apartments in Amsterdam where asking rent exceeds the legal WWS maximum.
+
 search:
   city: amsterdam
   max_rent: 3500
@@ -11,12 +12,52 @@ search:
   must_allow_students: true
   must_allow_sharing: true
   must_accept_guarantor: true
+
+# ── WWS scoring parameters ───────────────────────────────────────────
+# Everything below controls how the legal maximum rent is calculated.
+# Tune these to be more conservative (fewer false positives) or more
+# aggressive (catch more listings at the risk of some being wrong).
+#
+# The README section "How WWS points are calculated" explains each one.
 wws:
   bustable_only: true
-  min_savings: 50
+  min_savings: 50               # ignore listings where savings < this (EUR/mo)
   require_rb_agreement: false   # true = only alert when rent-buster.nl also calls it bustable
-  # Used when the ad gives no detail (and no LLM extraction). Standard Amsterdam apartment:
-  default_outdoor_points: 2       # presence bonus (most apartments have a small balcony)
-  default_kitchen_points: 10      # counter 4 + faucet 1 + drain 1 + cooker 4
-  default_bathroom_points: 12     # toilet 3 + shower 4 + basin 1 + bath 3 + extras 1
-  default_heating_points: 2       # per heated room
+
+  # ── Alert quality filters ────────────────────────────────────────
+  # Skip alerts that don't meet these thresholds.
+  min_confidence: ""            # "" = no filter. "MEDIUM" = skip LOW/VERY_LOW.
+                                # Options: HIGH, MEDIUM, LOW, VERY_LOW
+  min_bust_score: 0             # skip alerts below this score (savings × confidence × WOZ reliability)
+                                # e.g. 200 filters out low-savings or low-confidence matches
+
+  # ── Database retention ───────────────────────────────────────────
+  retention_days: 90            # auto-delete disappeared listings older than this (0 = keep forever)
+
+  # ── Energy label assumption ──────────────────────────────────────
+  # When the listing doesn't show an energy label, assume this one.
+  # Higher label = more points = less likely to be flagged bustable.
+  #   Conservative (fewer alerts):  A  (+37 pts)
+  #   Moderate:                     C  (+15 pts)
+  #   Default / neutral:            D  (+11 pts)
+  #   Aggressive (more alerts):     E  ( -4 pts)
+  # Full table: A++++/+58  A+++/+53  A++/+48  A+/+43  A/+37
+  #             B/+30  C/+15  D/+11  E/-4  F/-9  G/-15
+  default_energy_label: D
+
+  # ── WOZ estimation ───────────────────────────────────────────────
+  # When the Kadaster API can't find the WOZ value (split apartments,
+  # new units, etc.), we estimate: surface_area × this number.
+  # Higher = more WOZ points = harder to be regulated = fewer alerts.
+  # Amsterdam municipal average is ~€7,500/m² but we use a conservative
+  # value because regulated apartments tend to be older/cheaper.
+  default_woz_per_m2: 6000      # EUR per m²
+
+  # ── Component defaults ───────────────────────────────────────────
+  # Used when the ad gives no detail (and no LLM extraction).
+  # These represent a standard Amsterdam apartment.
+  # More points = higher total = less likely to be bustable.
+  default_outdoor_points: 2     # balcony presence bonus; 0 = assume no outdoor space
+  default_kitchen_points: 10    # counter 4 + faucet 1 + drain 1 + cooker 4
+  default_bathroom_points: 12   # toilet 3 + shower 4 + basin 1 + bath 3 + extras 1
+  default_heating_points: 2     # per heated room (multiplied by room count)
