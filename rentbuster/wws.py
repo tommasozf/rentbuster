@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rentbuster.models import ConfidenceLevel, Listing
-from rentbuster.woz import WOZ_ESTIMATE_DEFAULT, WOZ_ESTIMATE_PER_M2
+from rentbuster.woz import WOZ_ESTIMATE_DEFAULT
 
 if TYPE_CHECKING:
     from rentbuster.llm import LLMExtraction
@@ -218,7 +218,6 @@ def calculate_wws(
         flags.append(f"energy_label_unknown_assumed_{d_energy_label}")
 
     # 3. WOZ value — two-part formula (the cap is applied after the other components are known)
-    city_key = (listing.city or "").lower().strip()
     woz_source = getattr(listing, "_woz_source", None)
     if listing.woz_value and listing.woz_value > 0:
         woz = listing.woz_value
@@ -285,7 +284,6 @@ def calculate_wws(
     # user can see whether the listing is still bustable with a good label.
     if "energy_label_unknown_assumed_D" in flags:
         label_a_pts = ENERGY_POINTS_APARTMENT["A"]
-        delta = label_a_pts - bd.energy_label
         alt_subtotal = (
             bd.surface_area + label_a_pts + bd.outdoor_space + bd.kitchen + bd.bathroom + bd.heating
         )

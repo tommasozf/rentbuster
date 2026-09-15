@@ -243,15 +243,19 @@ class RentBuster:
             if listing_rank < min_rank:
                 log.info(
                     "  skipped %s %s: confidence %s below minimum %s",
-                    listing.street, listing.house_number,
-                    listing.wws_confidence.value, min_conf,
+                    listing.street,
+                    listing.house_number,
+                    listing.wws_confidence.value,
+                    min_conf,
                 )
                 return False
         if self.profile.wws.min_bust_score and listing.bust_score < self.profile.wws.min_bust_score:
             log.info(
                 "  skipped %s %s: bust_score %.0f below minimum %.0f",
-                listing.street, listing.house_number,
-                listing.bust_score, self.profile.wws.min_bust_score,
+                listing.street,
+                listing.house_number,
+                listing.bust_score,
+                self.profile.wws.min_bust_score,
             )
             return False
         if self.profile.wws.require_rb_agreement and not rb_agrees(listing):
